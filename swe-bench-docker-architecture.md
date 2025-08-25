@@ -1,21 +1,21 @@
 # SWE-bench Docker Architecture Documentation
 
-## Обзор
+## Overview
 
-SWE-bench использует контейнеризованную систему оценки для обеспечения воспроизводимых результатов на различных платформах. Docker архитектура состоит из трех слоев образов, каждый из которых добавляет специфичную функциональность для выполнения тестов.
+SWE-bench uses a containerized evaluation system to ensure reproducible results across different platforms. The Docker architecture consists of three image layers, each adding specific functionality for test execution.
 
-## 🏗️ 3-слойная Docker архитектура
+## 🏗️ 3-Layer Docker Architecture
 
-### 1. Base Image (Базовый образ)
-**Назначение**: Общие зависимости для всех оценок  
-**Содержимое**: 
-- Ubuntu с базовыми системными пакетами
+### 1. Base Image
+**Purpose**: Common dependencies for all evaluations  
+**Contents**: 
+- Ubuntu with basic system packages
 - Git, wget, curl, build-essential
-- Python 3 и pip
-- Miniconda для управления Python окружениями
-- Пользователь nonroot для безопасности
+- Python 3 and pip
+- Miniconda for Python environment management
+- Nonroot user for security
 
-**Пример для Python**:
+**Python Example**:
 ```dockerfile
 FROM --platform={platform} ubuntu:{ubuntu_version}
 ARG DEBIAN_FRONTEND=noninteractive
@@ -26,7 +26,7 @@ RUN apt update && apt install -y \
     python3 python3-pip python-is-python3 \
     jq curl locales tzdata
 
-# Установка Miniconda
+# Install Miniconda
 RUN wget 'https://repo.anaconda.com/miniconda/Miniconda3-{conda_version}-Linux-{conda_arch}.sh' \
     && bash miniconda.sh -b -p /opt/miniconda3
 ENV PATH=/opt/miniconda3/bin:$PATH
@@ -35,15 +35,15 @@ RUN conda init --all && conda config --append channels conda-forge
 RUN adduser --disabled-password --gecos 'dog' nonroot
 ```
 
-### 2. Environment Image (Образ окружения)
-**Назначение**: Python окружения для различных конфигураций  
-**Содержимое**:
-- Наследует от базового образа
-- Выполняет `setup_env.sh` для настройки Python окружения
-- Создает conda environment "testbed"
-- Автоматически активирует окружение при запуске
+### 2. Environment Image
+**Purpose**: Python environments for various configurations  
+**Contents**:
+- Inherits from base image
+- Executes `setup_env.sh` for Python environment setup
+- Creates conda environment "testbed"
+- Automatically activates environment on startup
 
-**Пример для Python**:
+**Python Example**:
 ```dockerfile
 FROM --platform={platform} {base_image_key}
 
@@ -54,19 +54,19 @@ RUN /bin/bash -c "source ~/.bashrc && /root/setup_env.sh"
 
 WORKDIR /testbed/
 
-# Автоматическая активация testbed окружения
+# Automatic testbed environment activation
 RUN echo "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed" > /root/.bashrc
 ```
 
-### 3. Instance Image (Образ экземпляра)
-**Назначение**: Специфичные зависимости для каждой задачи оценки  
-**Содержимое**:
-- Наследует от environment образа
-- Выполняет `setup_repo.sh` для клонирования репозитория
-- Устанавливает зависимости конкретного проекта
-- Настраивает рабочую директорию `/testbed`
+### 3. Instance Image
+**Purpose**: Specific dependencies for each evaluation task  
+**Contents**:
+- Inherits from environment image
+- Executes `setup_repo.sh` for repository cloning
+- Installs specific project dependencies
+- Configures working directory `/testbed`
 
-**Пример для Python**:
+**Python Example**:
 ```dockerfile
 FROM --platform={platform} {env_image_name}
 
@@ -77,23 +77,23 @@ RUN /bin/bash /root/setup_repo.sh
 WORKDIR /testbed/
 ```
 
-## 🔄 Процесс сборки образов
+## 🔄 Image Building Process
 
-### Этапы сборки:
+### Build Stages:
 
 1. **Base Image Build**
-   - Создается для каждой платформы (Linux x86_64, ARM64)
-   - Устанавливаются общие системные зависимости
-   - Настраивается Miniconda
+   - Created for each platform (Linux x86_64, ARM64)
+   - Installs common system dependencies
+   - Configures Miniconda
 
 2. **Environment Image Build**
-   - Создается на основе base image
-   - Выполняется `setup_env.sh` для настройки Python
-   - Создается conda environment "testbed"
-   - Кэшируется для повторного использования
+   - Created based on base image
+   - Executes `setup_env.sh` for Python setup
+   - Creates conda environment "testbed"
+   - Cached for reuse
 
 3. **Instance Image Build**
-   - Создается для каждого экземпляра оценки
+   - Created for each evaluation instance
    - Клонируется конкретный репозиторий
    - Устанавливаются зависимости проекта
    - Применяется патч для исправления
