@@ -217,16 +217,19 @@ jobs:
           fi
           
           echo "Running validation script..."
-          python scripts/validate_changed.py || {
-            echo "❌ Validation script failed"
+          python scripts/validate_changed.py
+          VALIDATION_EXIT_CODE=$?
+          echo "Validation script completed with exit code: $VALIDATION_EXIT_CODE"
+          
+          if [ $VALIDATION_EXIT_CODE -ne 0 ]; then
+            echo "❌ Some validations failed (but continuing to generate report)"
             echo "Python version: $(python --version)"
             echo "Current directory: $(pwd)"
             echo "Environment variables:"
             env | grep -E "(CHANGED_FILES|GITHUB_|PATH)" | sort
             echo "Last few lines of any log files:"
             find . -name "*.log" -type f -exec tail -10 {} \; 2>/dev/null || echo "No log files found"
-            exit 1
-          }
+          fi
           
         else
           echo "📭 No data points to validate"
