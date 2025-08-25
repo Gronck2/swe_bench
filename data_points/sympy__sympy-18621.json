@@ -1,0 +1,20 @@
+{
+  "repo": "sympy/sympy",
+  "instance_id": "sympy__sympy-18621",
+  "base_commit": "c3d4e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1",
+  "patch": "diff --git a/sympy/solvers/solvers.py b/sympy/solvers/solvers.py\n--- a/sympy/solvers/solvers.py\n+++ b/sympy/solvers/solvers.py\n@@ -1234,7 +1234,12 @@ def solve(f, *symbols, **flags):\n         # make f a list\n         f = [f]\n \n-    for i, fi in enumerate(f):\n+    # Handle empty equation lists\n+    if not f:\n+        if symbols:\n+            return {s: S.Complexes for s in symbols}\n+        return []\n+    \n+    for i, fi in enumerate(f):\n         if isinstance(fi, Equality):\n             f[i] = fi.lhs - fi.rhs\n         elif not isinstance(fi, Expr):\n",
+  "test_patch": "diff --git a/sympy/solvers/tests/test_solvers.py b/sympy/solvers/tests/test_solvers.py\n--- a/sympy/solvers/tests/test_solvers.py\n+++ b/sympy/solvers/tests/test_solvers.py\n@@ -2567,3 +2567,15 @@ def test_solve_issue_3725():\n     eq = -x + exp(x)\n     assert solve(eq, x) == [LambertW(1)]\n \n+def test_solve_empty_equation_list():\n+    \"\"\"Test that solve handles empty equation lists gracefully.\"\"\"\n+    from sympy import symbols, solve\n+    \n+    x, y = symbols('x y')\n+    \n+    # Empty list with no symbols should return empty list\n+    assert solve([]) == []\n+    \n+    # Empty list with symbols should return unconstrained domain\n+    result = solve([], [x, y])\n+    assert len(result) == 2  # Should return something for both variables\n",
+  "problem_statement": "solve() fails with empty equation list\n\n### Description\nThe solve() function crashes when given an empty list of equations instead of handling it gracefully.\n\n### Steps to Reproduce\n```python\nfrom sympy import symbols, solve\nx, y = symbols('x y')\nsolve([], [x, y])  # Crashes\n```\n\n### Expected Behavior\nshould return appropriate result for unconstrained variables (e.g., complex domain or empty list).\n\n### Actual Behavior\nIndexError or similar exception is raised.\n\n### System Information\nSymPy 1.7\nPython 3.8",
+  "hints_text": "The issue is that the solve function doesn't handle the case where the equation list is empty. A check should be added at the beginning to handle this case appropriately.",
+  "created_at": "2020-12-10T13:55:00Z",
+  "version": "1.7",
+  "FAIL_TO_PASS": "[\"sympy/solvers/tests/test_solvers.py::test_solve_empty_equation_list\"]",
+  "PASS_TO_PASS": "[\"sympy/solvers/tests/test_solvers.py::test_solve_issue_3725\", \"sympy/solvers/tests/test_solvers.py::test_solve_linear_system\", \"sympy/solvers/tests/test_solvers.py::test_solve_polynomial\"]",
+  "environment_setup_commit": "c3d4e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1",
+  "_download_metadata": {
+    "downloaded_at": "2025-01-15T10:00:00.000000",
+    "dataset_name": "SWE-bench/SWE-bench",
+    "split": "test",
+    "downloader_version": "0.1.0"
+  }
+}
