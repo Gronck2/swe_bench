@@ -4,7 +4,7 @@
   "base_commit": "3832210580d516365ddae1a62071001faf94d416",
   "patch": "diff --git a/astropy/test.py b/astropy/test.py\n+++ b/astropy/test.py\n@@ -1,3 +1,4 @@\n # test file\n+print('hello')\n",
   "test_patch": "diff --git a/astropy/test_test.py b/astropy/test_test.py\n+++ b/astropy/test_test.py\n@@ -1,3 +1,4 @@\n # test\n+assert True\n",
-  "problem_statement": "Test invalid JSON syntax",
+  "problem_statement": "Test invalid JSON syntax - updated for testing",
   "FAIL_TO_PASS": "[\"test_something\"]",
   "PASS_TO_PASS": "["test_other"]",
   "environment_setup_commit": "3832210580d516365ddae1a62071001faf94d416"
