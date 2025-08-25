@@ -1,0 +1,17 @@
+{
+  "repo": "nonexistent/fake-repo",
+  "instance_id": "neg5__bad-repo",
+  "base_commit": "ffffffffffffffffffffffffffffffffffffffff",
+  "patch": "diff --git a/fake/file.py b/fake/file.py\n--- a/fake/file.py\n+++ b/fake/file.py\n@@ -1,3 +1,4 @@\n # fake file\n+print('hello')\n",
+  "test_patch": "diff --git a/fake/test_file.py b/fake/test_file.py\n--- a/fake/test_file.py\n+++ b/fake/test_file.py\n@@ -1,3 +1,4 @@\n # fake test\n+assert True\n",
+  "problem_statement": "Test with nonexistent repository and invalid commit hash",
+  "FAIL_TO_PASS": "[\"fake/test_file.py::test_something\"]",
+  "PASS_TO_PASS": "[\"fake/test_file.py::test_other\"]",
+  "environment_setup_commit": "ffffffffffffffffffffffffffffffffffffffff",
+  "_download_metadata": {
+    "downloaded_at": "2025-01-15T10:00:00.000000",
+    "dataset_name": "SWE-bench/SWE-bench",
+    "split": "test",
+    "downloader_version": "0.1.0"
+  }
+}

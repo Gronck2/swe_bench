@@ -1,0 +1,9 @@
+{
+  "repo": "astropy/astropy",
+  "instance_id": "neg2__missing-fields",
+  "base_commit": "3832210580d516365ddae1a62071001faf94d416",
+  "problem_statement": "Test missing required fields - отсутствуют patch и test_patch",
+  "FAIL_TO_PASS": "[\"test_something\"]",
+  "PASS_TO_PASS": "[\"test_other\"]",
+  "environment_setup_commit": "3832210580d516365ddae1a62071001faf94d416"
+}
