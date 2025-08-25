@@ -1,0 +1,17 @@
+{
+  "repo": "astropy/astropy",
+  "instance_id": "neg3__syntax-error",
+  "base_commit": "3832210580d516365ddae1a62071001faf94d416",
+  "patch": "diff --git a/astropy/wcs/wcsapi/fitswcs.py b/astropy/wcs/wcsapi/fitswcs.py\n--- a/astropy/wcs/wcsapi/fitswcs.py\n+++ b/astropy/wcs/wcsapi/fitswcs.py\n@@ -323,7 +323,8 @@ def pixel_to_world_values(self, *pixel_arrays):\n         return world[0] if self.world_n_dim == 1 else tuple(world)\n \n     def world_to_pixel_values(self, *world_arrays):\n-        pixel = self.all_world2pix(*world_arrays, 0)\n+        # Добавляем синтаксическую ошибку\n+        pixel = self.all_world2pix(*world_arrays, 0\n         return pixel[0] if self.pixel_n_dim == 1 else tuple(pixel)\n \n     @property\n",
+  "test_patch": "diff --git a/astropy/wcs/wcsapi/tests/test_fitswcs.py b/astropy/wcs/wcsapi/tests/test_fitswcs.py\n--- a/astropy/wcs/wcsapi/tests/test_fitswcs.py\n+++ b/astropy/wcs/wcsapi/tests/test_fitswcs.py\n@@ -1067,3 +1067,8 @@ def test_different_ctypes(header_spectral_frames, ctype3, observer):\n             pix = wcs.world_to_pixel(skycoord, spectralcoord)\n \n     assert_allclose(pix, [0, 0, 31], rtol=1e-6)\n+\n+def test_syntax_error():\n+    \"\"\"Test that should pass but code has syntax error.\"\"\"\n+    assert True\n",
+  "problem_statement": "Test syntax error in patch - missing closing parenthesis",
+  "FAIL_TO_PASS": "[\"astropy/wcs/wcsapi/tests/test_fitswcs.py::test_syntax_error\"]",
+  "PASS_TO_PASS": "[\"astropy/wcs/wcsapi/tests/test_fitswcs.py::test_empty\"]",
+  "environment_setup_commit": "3832210580d516365ddae1a62071001faf94d416",
+  "_download_metadata": {
+    "downloaded_at": "2025-01-15T10:00:00.000000",
+    "dataset_name": "SWE-bench/SWE-bench",
+    "split": "test",
+    "downloader_version": "0.1.0"
+  }
+}
