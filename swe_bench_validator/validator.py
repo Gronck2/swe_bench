@@ -195,9 +195,8 @@ class SWEBenchValidator:
             if self.verbose:
                 console.print(f"Running validation for {instance_id}...")
             
-            # Note: run_instance requires additional setup that we'll implement
-            # For now, we'll simulate the validation process
-            validation_success = self._simulate_validation(data_point, prediction, test_spec)
+            # Run the actual SWE-bench evaluation harness
+            validation_success, test_results = self._run_evaluation_harness(data_point, prediction, test_spec)
             
             execution_time = time.time() - start_time
             
@@ -205,19 +204,20 @@ class SWEBenchValidator:
                 return ValidationResult(
                     instance_id=instance_id,
                     success=True,
-                    patch_applied=True,
-                    tests_passed=True,
+                    patch_applied=test_results.get('patch_applied', True),
+                    tests_passed=test_results.get('tests_passed', True),
                     execution_time=execution_time,
-                    test_results={'status': 'PASSED'}
+                    test_results=test_results
                 )
             else:
                 return ValidationResult(
                     instance_id=instance_id,
                     success=False,
-                    patch_applied=False,
-                    tests_passed=False,
-                    error_message="Validation failed",
-                    execution_time=execution_time
+                    patch_applied=test_results.get('patch_applied', False),
+                    tests_passed=test_results.get('tests_passed', False),
+                    error_message=test_results.get('error_message', 'Validation failed'),
+                    execution_time=execution_time,
+                    test_results=test_results
                 )
                 
         except Exception as e:
@@ -231,28 +231,78 @@ class SWEBenchValidator:
                 execution_time=execution_time
             )
     
-    def _simulate_validation(self, data_point: Dict[str, Any], prediction: Dict[str, str], test_spec: TestSpec) -> bool:
+    def _run_evaluation_harness(self, data_point: Dict[str, Any], prediction: Dict[str, str], test_spec: TestSpec) -> Tuple[bool, Dict[str, Any]]:
         """
-        Simulate validation process for development/testing.
-        This will be replaced with actual harness integration.
+        Run the actual SWE-bench evaluation harness to validate the data point.
+        
+        Args:
+            data_point: The data point to validate
+            prediction: The prediction in SWE-bench format
+            test_spec: The test specification
+            
+        Returns:
+            (validation_success, test_results)
         """
-        # For now, we'll do basic validation without running Docker
-        # This allows us to test the validator structure
-        
-        # Check if patch looks valid (basic syntax check)
-        patch = data_point.get('patch', '')
-        if not patch.startswith('diff --git'):
-            return False
-        
-        # Check if test specifications exist
-        fail_to_pass = data_point.get('FAIL_TO_PASS', '')
-        pass_to_pass = data_point.get('PASS_TO_PASS', '')
-        
-        if not fail_to_pass and not pass_to_pass:
-            return False
-        
-        # Basic validation passed
-        return True
+        try:
+            if self.verbose:
+                console.print(f"[cyan]Running SWE-bench harness for {prediction[KEY_INSTANCE_ID]}[/cyan]")
+            
+            # Run the official SWE-bench evaluation
+            # This is the key function that actually validates the patch
+            eval_result = run_instance(
+                test_spec=test_spec,
+                pred=prediction,
+                run_id=f"validation-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+                timeout=self.timeout,
+                rm_image=not self.cache_level == "instance",
+                force_rebuild=self.force_rebuild,
+                client=self.docker_client
+            )
+            
+            if self.verbose:
+                console.print(f"[cyan]Evaluation result: {eval_result}[/cyan]")
+            
+            # Parse the evaluation result
+            test_results = {
+                'eval_result': eval_result,
+                'patch_applied': False,
+                'tests_passed': False
+            }
+            
+            # Check if the evaluation was successful
+            if eval_result and 'report' in eval_result:
+                report = eval_result['report']
+                
+                # Check if patch was applied successfully
+                if report.get('applied', False):
+                    test_results['patch_applied'] = True
+                
+                # Check if tests passed
+                # The evaluation is successful if all FAIL_TO_PASS tests now pass
+                # and all PASS_TO_PASS tests continue to pass
+                if report.get('resolved', False):
+                    test_results['tests_passed'] = True
+                    return True, test_results
+                else:
+                    # Get details about failed tests
+                    test_results['failed_tests'] = report.get('failed_tests', [])
+                    test_results['error_message'] = report.get('error_message', 'Tests failed')
+                    return False, test_results
+            else:
+                test_results['error_message'] = 'Evaluation harness failed to run'
+                return False, test_results
+                
+        except Exception as e:
+            error_msg = f"Error running evaluation harness: {str(e)}"
+            if self.verbose:
+                console.print(f"[red]{error_msg}[/red]")
+            
+            test_results = {
+                'error_message': error_msg,
+                'patch_applied': False,
+                'tests_passed': False
+            }
+            return False, test_results
     
     def validate_directory(self, progress_callback: Optional[callable] = None) -> List[ValidationResult]:
         """

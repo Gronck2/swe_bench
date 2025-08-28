@@ -54,22 +54,9 @@ jobs:
     
     - name: Set up Docker
       run: |
-        echo "🐳 Setting up Docker..."
+        echo "🐳 Setting up Docker for SWE-bench validation..."
+        
         # Docker is pre-installed in GitHub Actions runners
-        # Just ensure it's running and accessible
-        echo "Starting Docker service..."
-        sudo systemctl start docker || {
-          echo "❌ Failed to start Docker service"
-          sudo systemctl status docker
-          exit 1
-        }
-        
-        echo "Adding user to docker group..."
-        sudo usermod -aG docker $USER || {
-          echo "❌ Failed to add user to docker group"
-          exit 1
-        }
-        
         echo "Verifying Docker installation..."
         docker --version || {
           echo "❌ Docker not available"
@@ -79,10 +66,17 @@ jobs:
         echo "Testing Docker access..."
         docker info || {
           echo "❌ Docker daemon not accessible"
-          echo "Docker service status:"
-          sudo systemctl status docker
           exit 1
         }
+        
+        echo "Configuring Docker for SWE-bench..."
+        # Set Docker to use more disk space if needed
+        docker system prune -f || echo "Docker cleanup failed"
+        
+        # Check available disk space
+        echo "Available disk space:"
+        df -h
+        
         echo "✅ Docker setup completed successfully"
     
     - name: Install Python dependencies
@@ -206,6 +200,17 @@ jobs:
           echo "Files to validate:"
           echo "$CHANGED_FILES"
           
+          # Set SWE-bench specific environment variables
+          echo "🔧 Configuring SWE-bench environment..."
+          export SWE_BENCH_TIMEOUT=1800  # 30 minutes timeout per validation
+          export SWE_BENCH_CACHE_LEVEL=none  # No caching to save disk space
+          export DOCKER_BUILDKIT=1  # Enable BuildKit for better performance
+          
+          echo "Environment configuration:"
+          echo "- Timeout: $SWE_BENCH_TIMEOUT seconds"
+          echo "- Cache level: $SWE_BENCH_CACHE_LEVEL"
+          echo "- BuildKit: $DOCKER_BUILDKIT"
+          
           # Check if validation script exists
           if [ ! -f "scripts/validate_changed.py" ]; then
             echo "❌ Validation script not found: scripts/validate_changed.py"
@@ -216,19 +221,34 @@ jobs:
             exit 1
           fi
           
-          echo "Running validation script..."
+          # Set resource limits for Docker containers
+          echo "🐳 Setting Docker resource limits..."
+          export DOCKER_DEFAULT_PLATFORM=linux/amd64
+          
+          echo "Running validation script with enhanced error handling..."
           python scripts/validate_changed.py
           VALIDATION_EXIT_CODE=$?
           echo "Validation script completed with exit code: $VALIDATION_EXIT_CODE"
           
           if [ $VALIDATION_EXIT_CODE -ne 0 ]; then
             echo "❌ Some validations failed (but continuing to generate report)"
+            echo "🔍 Debug information:"
             echo "Python version: $(python --version)"
             echo "Current directory: $(pwd)"
+            echo "Docker status:"
+            docker ps -a | head -5 2>/dev/null || echo "No Docker containers"
+            echo "Docker images:"
+            docker images | head -5 2>/dev/null || echo "No Docker images"
             echo "Environment variables:"
-            env | grep -E "(CHANGED_FILES|GITHUB_|PATH)" | sort
-            echo "Last few lines of any log files:"
-            find . -name "*.log" -type f -exec tail -10 {} \; 2>/dev/null || echo "No log files found"
+            env | grep -E "(CHANGED_FILES|SWE_BENCH|DOCKER|GITHUB_|PATH)" | sort
+            echo "📄 Log files found:"
+            find . -name "*.log" -type f 2>/dev/null | head -10 || echo "No log files found"
+            echo "🔚 Last few lines of recent log files:"
+            find . -name "*.log" -type f -mtime -1 -exec echo "=== {} ===" \; -exec tail -20 {} \; 2>/dev/null || echo "No recent log files"
+            
+            # Clean up Docker resources to prevent disk space issues
+            echo "🧹 Cleaning up Docker resources..."
+            docker system prune -f --volumes 2>/dev/null || echo "Docker cleanup failed"
           fi
           
         else
@@ -275,6 +295,18 @@ jobs:
             status = '❌ FAILED';
           }
           
+          // Enhanced comment with Docker context
+          let dockerNote = '';
+          if (failed > 0) {
+            dockerNote = `
+          
+          **Note**: Some failures may be due to missing Docker environment images in CI. This is expected when:
+          - SWE-bench environment images are not pre-built
+          - Error message contains "Environment image ... not found"
+          
+          For local testing with full Docker support, see README.md Docker Setup section.`;
+          }
+          
           const comment = `## 🔍 SWE-bench Validation Results
           
           **Status**: ${status}
@@ -282,7 +314,7 @@ jobs:
           **Passed**: ${passed} ✅
           **Failed**: ${failed} ❌
           
-          ${failed > 0 ? '**Action Required**: Please fix the failed validations before merging.' : '**All validations passed successfully!**'}
+          ${failed > 0 ? '**Action Required**: Please fix the failed validations before merging.' : '**All validations passed successfully!**'}${dockerNote}
           
           ---
           *This comment was automatically generated by the SWE-bench validation workflow.*`;

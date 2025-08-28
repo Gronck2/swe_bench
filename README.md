@@ -8,7 +8,7 @@ This project provides automated validation of SWE-bench data points using the of
 
 ## 🚀 Features
 
-- ✅ **Official SWE-bench Integration**: Uses `swebench.harness.run_evaluation`
+- ✅ **Official SWE-bench Integration**: Uses `swebench.harness.run_evaluation` with `run_instance()`
 - ✅ **Docker-based Validation**: Isolated test execution environment
 - ✅ **GitHub Actions CI/CD**: Automatic validation on PR/push
 - ✅ **Comprehensive Error Reporting**: Detailed validation failure diagnostics
@@ -65,6 +65,16 @@ For detailed architecture documentation, see [swe-bench-docker-architecture.md](
 4. **Verify installation:**
    ```bash
    python -m swe_bench_validator --help
+   ```
+
+5. **Docker Setup** (Required for full validation):
+   ```bash
+   # Ensure Docker is running
+   docker --version
+   
+   # For full validation, SWE-bench environment images are needed
+   # These can be built or downloaded (requires significant time/resources)
+   # See Docker Architecture section for details
    ```
 
 ## 🔧 Usage
