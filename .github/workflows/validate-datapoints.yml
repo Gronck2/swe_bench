@@ -70,10 +70,10 @@ jobs:
           echo "⚠️ data_points directory not found!"
         fi
     
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.11"
         cache: 'pip'
     
     - name: Set up Docker
@@ -155,32 +155,82 @@ jobs:
           BASE_SHA="${{ github.event.before }}"
           HEAD_SHA="${{ github.event.after }}"
           echo "Push mode: comparing $BASE_SHA to $HEAD_SHA"
+          
+          # Handle edge cases for push events
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "⚠️ Invalid or empty BASE_SHA detected (likely first commit or force push)"
+            echo "Falling back to checking all JSON files in data_points/"
+            if [ -d "data_points" ]; then
+              ALL_CHANGED=$(find data_points -name "*.json" -type f)
+              echo "Found JSON files for validation:"
+              echo "$ALL_CHANGED"
+            else
+              echo "❌ No data_points directory found"
+              exit 1
+            fi
+          else
+            echo "Valid BASE_SHA detected: $BASE_SHA"
+          fi
         fi
         
-        echo "Checking if SHAs are valid..."
-        git show --format="" --name-only $BASE_SHA >/dev/null 2>&1 || {
-          echo "❌ Base SHA $BASE_SHA is not valid"
-          echo "Available commits:"
-          git log --oneline -10
-          exit 1
-        }
+        # Only validate SHAs if we have valid ones
+        if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+          echo "Checking if SHAs are valid..."
+          git show --format="" --name-only $BASE_SHA >/dev/null 2>&1 || {
+            echo "❌ Base SHA $BASE_SHA is not valid"
+            echo "Available commits:"
+            git log --oneline -10
+            echo "Falling back to checking all JSON files..."
+            if [ -d "data_points" ]; then
+              ALL_CHANGED=$(find data_points -name "*.json" -type f)
+            else
+              echo "❌ No data_points directory found"
+              exit 1
+            fi
+          }
+        fi
         
-        git show --format="" --name-only $HEAD_SHA >/dev/null 2>&1 || {
-          echo "❌ Head SHA $HEAD_SHA is not valid" 
-          echo "Available commits:"
-          git log --oneline -10
-          exit 1
-        }
+        if [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" != "0000000000000000000000000000000000000000" ]; then
+          git show --format="" --name-only $HEAD_SHA >/dev/null 2>&1 || {
+            echo "❌ Head SHA $HEAD_SHA is not valid" 
+            echo "Available commits:"
+            git log --oneline -10
+            echo "Falling back to checking all JSON files..."
+            if [ -d "data_points" ]; then
+              ALL_CHANGED=$(find data_points -name "*.json" -type f)
+            else
+              echo "❌ No data_points directory found"
+              exit 1
+            fi
+          }
+        fi
         
-        echo "Getting changed files..."
-        ALL_CHANGED=$(git diff --name-only --diff-filter=AM $BASE_SHA $HEAD_SHA 2>&1) || {
-          echo "❌ Failed to get diff between $BASE_SHA and $HEAD_SHA"
-          echo "Git status:"
-          git status
-          echo "Git log:"
-          git log --oneline -5
-          exit 1
-        }
+        # Get changed files only if we have valid SHAs and haven't already set ALL_CHANGED
+        if [ -z "$ALL_CHANGED" ] && [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] && [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" != "0000000000000000000000000000000000000000" ]; then
+          echo "Getting changed files..."
+          ALL_CHANGED=$(git diff --name-only --diff-filter=AM $BASE_SHA $HEAD_SHA 2>&1) || {
+            echo "❌ Failed to get diff between $BASE_SHA and $HEAD_SHA"
+            echo "Git status:"
+            git status
+            echo "Git log:"
+            git log --oneline -5
+            echo "Falling back to checking all JSON files..."
+            if [ -d "data_points" ]; then
+              ALL_CHANGED=$(find data_points -name "*.json" -type f)
+            else
+              echo "❌ No data_points directory found"
+              exit 1
+            fi
+          }
+        elif [ -z "$ALL_CHANGED" ]; then
+          echo "⚠️ Unable to determine changed files, checking all JSON files..."
+          if [ -d "data_points" ]; then
+            ALL_CHANGED=$(find data_points -name "*.json" -type f)
+          else
+            echo "❌ No data_points directory found"
+            exit 1
+          fi
+        fi
         
         echo "All changed files:"
         echo "$ALL_CHANGED"
@@ -226,12 +276,25 @@ jobs:
           
           # Install our validator in the official SWE-bench environment
           echo "📦 Installing validator in SWE-bench environment..."
+          
+          # Check if this is a Python package
+          if [ ! -f "pyproject.toml" ] && [ ! -f "setup.py" ]; then
+            echo "❌ This repository is not a Python package (no pyproject.toml or setup.py found)"
+            echo "Available files:"
+            ls -la
+            echo "Cannot install validator package. Workflow requires Python package structure."
+            exit 1
+          fi
+          
           pip install -e . || {
-            echo "❌ Failed to install validator"
+            echo "❌ Failed to install validator package"
             echo "Available files:"
             ls -la
             echo "Python path:"
             python -c "import sys; print(sys.path)"
+            echo "Package structure check:"
+            [ -f "pyproject.toml" ] && echo "✅ pyproject.toml exists" || echo "❌ pyproject.toml missing"
+            [ -f "setup.py" ] && echo "✅ setup.py exists" || echo "❌ setup.py missing"
             exit 1
           }
           
