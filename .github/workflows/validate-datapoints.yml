@@ -67,19 +67,13 @@ jobs:
           echo "Disk usage after cleanup:" && df -h
           echo "Docker system df after cleanup:" && (docker system df || true)
 
-      - name: Prebuild via SWE-bench CLI (gold predictions)
+      - name: Prebuild env images via Harness API
         if: steps.changed.outputs.any_changed == 'true'
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+          FORCE_REBUILD: 1
         run: |
-          set -e
-          echo "$CHANGED_FILES" | awk -F/ '/\.json$/ && $1=="data_points" {gsub(/\.json$/,"",$2); print $2}' | sort -u > ids.txt
-          echo "Instances:"; cat ids.txt || true
-          while IFS= read -r id; do
-            [ -z "$id" ] && continue
-            echo "Prebuilding via run_evaluation for $id"
-            python -m swebench.harness.run_evaluation --predictions_path gold --max_workers 1 --instance_ids "$id" --run_id "prebuild-${GITHUB_RUN_ID}" || true
-          done < ids.txt
+          python scripts/prebuild_env.py
 
       - name: Validate changed data points
         if: steps.changed.outputs.any_changed == 'true'
