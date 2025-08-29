@@ -300,9 +300,43 @@ jobs:
           
           # Verify installation
           echo "✅ Verifying validator installation..."
-          python -c "from swe_bench_validator.validator import SWEBenchValidator; print('✅ Validator module imported successfully')" || {
-            echo "❌ Validator import failed"
-            pip list | grep agent
+          
+          # Extended diagnostics for CI debugging
+          echo "🔍 Extended CI diagnostics:"
+          echo "Current directory: $(pwd)"
+          echo "Python version: $(python --version)"
+          echo "Pip version: $(pip --version)"
+          echo "Available memory: $(free -h 2>/dev/null || echo 'N/A (not Linux)')"
+          echo "Disk space: $(df -h . | tail -1)"
+          echo "Python path:"
+          python -c "import sys; print('\n'.join(sys.path))"
+          echo "Installed packages:"
+          pip list
+          echo "Package structure:"
+          ls -la
+          
+          # Test import with detailed error
+          python -c "
+import sys
+import traceback
+try:
+    from swe_bench_validator.validator import SWEBenchValidator
+    print('✅ Validator module imported successfully')
+except ImportError as e:
+    print(f'❌ Import error: {e}')
+    print('Available modules:')
+    import pkgutil
+    for importer, modname, ispkg in pkgutil.iter_modules():
+        if 'swe' in modname.lower() or 'agent' in modname.lower():
+            print(f'  {modname}')
+    traceback.print_exc()
+    sys.exit(1)
+except Exception as e:
+    print(f'❌ Unexpected error: {e}')
+    traceback.print_exc()
+    sys.exit(1)
+" || {
+            echo "❌ Validator import failed with detailed diagnostics above"
             exit 1
           }
           
