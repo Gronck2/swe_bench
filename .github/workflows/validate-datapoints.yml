@@ -29,8 +29,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e .
-          test -f requirements.txt && uv pip install -r requirements.txt || true
+          uv pip install --system -e .
+          test -f requirements.txt && uv pip install --system -r requirements.txt || true
 
       - name: Detect changed files
         id: changed
