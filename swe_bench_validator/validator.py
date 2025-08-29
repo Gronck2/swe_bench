@@ -276,6 +276,14 @@ class SWEBenchValidator:
             call_kwargs['rm_image'] = False
         if 'remove_image' in params:
             call_kwargs['remove_image'] = False
+        # Build/ensure flags (help auto-build missing env/instance images)
+        for key in (
+            'build_env', 'build_images', 'build_missing', 'ensure_env',
+            'ensure_images', 'rebuild_env', 'rebuild'
+        ):
+            if key in params:
+                # Prefer force_rebuild to drive rebuild when requested
+                call_kwargs[key] = bool(self.force_rebuild) or key in ('build_env', 'build_images', 'build_missing', 'ensure_env', 'ensure_images')
 
         if 'cache_level' in params and self.cache_level:
             call_kwargs['cache_level'] = self.cache_level

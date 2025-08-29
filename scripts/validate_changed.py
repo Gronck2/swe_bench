@@ -122,7 +122,7 @@ def main():
             instance_id = Path(file_path).stem
             print(f"  Instance ID: {instance_id}")
             
-            cmd = ['python', '-m', 'swe_bench_validator', '--instance', instance_id]
+            cmd = ['python', '-m', 'swe_bench_validator', '--instance', instance_id, '--force-rebuild']
             print(f"  Command: {' '.join(cmd)}")
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
