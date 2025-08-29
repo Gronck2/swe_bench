@@ -124,6 +124,7 @@ def main():
             import swebench.harness.docker_build as db  # type: ignore
             import docker  # type: ignore
             import inspect
+            from datetime import datetime
 
             # Create TestSpec from local datapoint (no dataset dependency)
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -198,6 +199,9 @@ def main():
             elif 'prediction' in params: call_kwargs['prediction'] = pred
             if 'client' in params: call_kwargs['client'] = client
             if 'docker_client' in params: call_kwargs['docker_client'] = client
+            # Provide a stable run_id
+            run_id = f"validation-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+            if 'run_id' in params: call_kwargs['run_id'] = run_id
             if 'cache_level' in params: call_kwargs['cache_level'] = _os.environ['SWE_BENCH_CACHE_LEVEL']
             if 'timeout' in params: call_kwargs['timeout'] = 600
             if 'force_rebuild' in params: call_kwargs['force_rebuild'] = True
