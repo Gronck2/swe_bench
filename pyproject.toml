@@ -14,10 +14,11 @@ dependencies = [
     "click>=8.0.0",
     "rich>=12.0.0",
     "swebench>=4.0.4",
+    "docker>=7.0.0",
 ]
 
 [tool.setuptools.packages.find]
-include = ["swe_bench_downloader*", "swe_bench_validator*", "swe_bench_releaser*"]
+include = ["swe_bench_downloader*", "swe_bench_validator*"]
 exclude = ["tests*", "specs*", "features*", "swe-bench*"]
 
 [project.optional-dependencies]

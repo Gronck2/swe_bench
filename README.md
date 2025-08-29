@@ -38,7 +38,7 @@ For detailed architecture documentation, see [swe-bench-docker-architecture.md](
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 - Docker
 - Git
 - UV package manager (recommended) or pip
@@ -51,18 +51,23 @@ For detailed architecture documentation, see [swe-bench-docker-architecture.md](
    cd swe_bench
    ```
 
-2. **Create virtual environment:**
+2. **Create environment (UV - recommended):**
+   ```bash
+   uv venv
+   source .venv/bin/activate
+   uv pip install -e .
+   # Если используется requirements.txt (опционально)
+   test -f requirements.txt && uv pip install -r requirements.txt || true
+   ```
+
+   **Alternative (pip):**
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
    pip install -r requirements.txt
    ```
 
-4. **Verify installation:**
+3. **Verify installation:**
    ```bash
    python -m swe_bench_validator --help
    ```
@@ -162,6 +167,12 @@ on:
     paths: ['data_points/**/*.json']
 ```
 
+#### Environment variables
+
+- `SWE_BENCH_CACHE_LEVEL`: `none|base|env|instance` (рекомендовано `base` для GitHub-hosted)
+- `DEBUG`: `1` включает подробные логи
+- `CHANGED_FILES`: список изменённых JSON для пакетной валидации (заполняется workflow)
+
 ## 🔍 Validation Process
 
 ### Validation Steps
@@ -207,8 +218,10 @@ on:
 
 Set cache level in environment:
 ```bash
-export SWE_BENCH_CACHE_LEVEL=env  # Recommended for CI/CD
+export SWE_BENCH_CACHE_LEVEL=base  # Recommended for GitHub-hosted runners
 ```
+
+Note: cache levels `env`/`instance` требуют значительного дискового пространства и подходят для self-hosted runners.
 
 ## 🧪 Testing
 
@@ -277,7 +290,7 @@ python -m swe_bench_validator --instance <id> --verbose
 Validation logs are stored in:
 ```
 logs/
-├── build/
+├── build_images/
 │   ├── base/           # Base image build logs
 │   ├── env/            # Environment image build logs
 │   └── instances/      # Instance image build logs
