@@ -67,17 +67,14 @@ jobs:
           echo "Disk usage after cleanup:" && df -h
           echo "Docker system df after cleanup:" && (docker system df || true)
 
-      - name: Validate changed data points
+      - name: Prebuild environment images
         if: steps.changed.outputs.any_changed == 'true'
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
           CHANGED_FILES_JSON: ${{ steps.changed.outputs.all_changed_files_json }}
-          SWE_BENCH_CACHE_LEVEL: base
         run: |
-          echo "Prebuilding environment images for changed instances..."
           python - <<'PY'
           import os, json, sys
-          from pathlib import Path
           try:
               from swebench.harness.test_spec.test_spec import make_test_spec
               import swebench.harness.docker_build as db
@@ -145,6 +142,16 @@ jobs:
               except Exception as e:
                   print(f"Skip {fp}: cannot create TestSpec: {e}")
                   continue
+              # Try to ensure/build base image first
+              for base_name in ('ensure_base_image','build_base_image','build_base'):
+                  if hasattr(db, base_name):
+                      print(f"Calling {base_name} for base (from {fp})")
+                      try:
+                          call_helper(getattr(db, base_name), ts, force=True)
+                          break
+                      except Exception as be:
+                          print(f"Base helper {base_name} failed: {be}")
+
               ok = False
               for name in ('ensure_env_image','build_env_image','build_environment_image','build_env'):
                   if hasattr(db, name):
@@ -153,8 +160,32 @@ jobs:
                           ok = True
                           break
               if not ok:
-                  print(f"No suitable env build helper for {fp}; proceeding")
+                  # If no helper worked, try to compute env image name and docker pull it
+                  pulled = False
+                  for getter in ('get_env_image_name','get_environment_image_name','env_image_name'):
+                      if hasattr(db, getter):
+                          try:
+                              env_name = getattr(db, getter)(ts)
+                              print(f"Attempt docker pull of env image: {env_name}")
+                              try:
+                                  client.images.pull(env_name)
+                                  pulled = True
+                                  break
+                              except Exception as pe:
+                                  print(f"docker pull failed: {pe}")
+                          except Exception as ge:
+                              print(f"Getter {getter} failed: {ge}")
+                  if not pulled:
+                      print(f"No suitable env build/pull method for {fp}; proceeding")
           PY
+
+      - name: Validate changed data points
+        if: steps.changed.outputs.any_changed == 'true'
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+          CHANGED_FILES_JSON: ${{ steps.changed.outputs.all_changed_files_json }}
+          SWE_BENCH_CACHE_LEVEL: base
+        run: |
           python scripts/validate_changed.py
 
       - name: Upload logs
