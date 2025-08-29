@@ -309,10 +309,36 @@ class SWEBenchValidator:
         if not call_kwargs:
             call_args = [test_spec, prediction]
 
+        def _invoke_run_instance():
+            return run_instance(*call_args, **call_kwargs)
+
         try:
-            result = run_instance(*call_args, **call_kwargs)
+            result = _invoke_run_instance()
         except Exception as e:
-            return False, {'error': f"Harness execution error: {type(e).__name__}: {e}", 'patch_applied': False, 'tests_passed': False}
+            # Attempt to recover from missing env image by building it, then retry once
+            missing_env = False
+            try:
+                import swebench.harness.docker_build as db
+                from swebench.harness.docker_build import BuildImageError  # type: ignore
+                if isinstance(e, BuildImageError) or 'Environment image' in str(e):
+                    missing_env = True
+            except Exception:
+                missing_env = 'Environment image' in str(e)
+
+            if missing_env:
+                try:
+                    # Build environment image explicitly and retry
+                    if hasattr(db, 'build_environment_image'):
+                        db.build_environment_image(test_spec, getattr(self, 'docker_client', None), logger, bool(self.force_rebuild))
+                    elif hasattr(db, 'build_env_image'):
+                        db.build_env_image(test_spec, getattr(self, 'docker_client', None), logger, bool(self.force_rebuild))
+                    elif hasattr(db, 'ensure_env_image'):
+                        db.ensure_env_image(test_spec, getattr(self, 'docker_client', None), logger)
+                    result = _invoke_run_instance()
+                except Exception as e2:
+                    return False, {'error': f"Harness execution error after env build: {type(e2).__name__}: {e2}", 'patch_applied': False, 'tests_passed': False}
+            else:
+                return False, {'error': f"Harness execution error: {type(e).__name__}: {e}", 'patch_applied': False, 'tests_passed': False}
 
         # Interpret result in a defensive way
         test_results: Dict[str, Any] = {}

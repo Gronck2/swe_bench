@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    timeout-minutes: 180
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,6 +41,32 @@ jobs:
             data_points/**/*.json
           separator: "\n"
 
+      - name: Docker diagnostics (before)
+        if: steps.changed.outputs.any_changed == 'true'
+        run: |
+          echo "Docker version:" && (docker --version || true)
+          echo "Docker info (short):" && (docker info -f '{{.Driver}} {{.ServerVersion}}' || true)
+          echo "Disk usage before cleanup:" && df -h
+          echo "Docker system df before cleanup:" && (docker system df || true)
+
+      - name: Docker cleanup
+        if: steps.changed.outputs.any_changed == 'true'
+        run: |
+          set +e
+          docker ps -a || true
+          docker system prune -af || sudo docker system prune -af || true
+          docker builder prune -af || sudo docker builder prune -af || true
+          docker image prune -af || sudo docker image prune -af || true
+          docker volume prune -f || sudo docker volume prune -f || true
+          docker system df || true
+          set -e
+
+      - name: Docker diagnostics (after cleanup)
+        if: steps.changed.outputs.any_changed == 'true'
+        run: |
+          echo "Disk usage after cleanup:" && df -h
+          echo "Docker system df after cleanup:" && (docker system df || true)
+
       - name: Validate changed data points
         if: steps.changed.outputs.any_changed == 'true'
         env:
@@ -47,6 +74,87 @@ jobs:
           CHANGED_FILES_JSON: ${{ steps.changed.outputs.all_changed_files_json }}
           SWE_BENCH_CACHE_LEVEL: base
         run: |
+          echo "Prebuilding environment images for changed instances..."
+          python - <<'PY'
+          import os, json, sys
+          from pathlib import Path
+          try:
+              from swebench.harness.test_spec.test_spec import make_test_spec
+              import swebench.harness.docker_build as db
+              import docker, inspect, logging
+              logger = logging.getLogger('prebuild')
+              logger.setLevel(logging.INFO)
+          except Exception as e:
+              print(f"Skip prebuild: harness modules not available: {e}")
+              sys.exit(0)
+
+          raw_json = os.environ.get('CHANGED_FILES_JSON','')
+          raw = os.environ.get('CHANGED_FILES','')
+          files = []
+          if raw_json:
+              try:
+                  files = [f for f in json.loads(raw_json) if f and f.endswith('.json')]
+              except Exception as e:
+                  print(f"Failed to parse CHANGED_FILES_JSON: {e}")
+          if not files and raw:
+              files = [f.strip() for f in raw.split('\n') if f.strip().endswith('.json')]
+          files = list(dict.fromkeys(files))
+          if not files:
+              sys.exit(0)
+
+          client = docker.from_env()
+
+          def call_helper(func, test_spec, force=False):
+              try:
+                  sig = inspect.signature(func)
+                  params = sig.parameters
+              except Exception:
+                  params = {}
+              kwargs = {}
+              if 'test_spec' in params:
+                  kwargs['test_spec'] = test_spec
+              if 'client' in params:
+                  kwargs['client'] = client
+              if 'docker_client' in params:
+                  kwargs['docker_client'] = client
+              if 'logger' in params:
+                  kwargs['logger'] = logger
+              for k in ('nocache','no_cache','force_rebuild','rebuild','ensure'):
+                  if k in params:
+                      kwargs[k] = bool(force)
+              try:
+                  func(**kwargs)
+                  return True
+              except TypeError:
+                  # positional fallback
+                  args=[]
+                  if 'test_spec' in params: args.append(test_spec)
+                  if 'client' in params: args.append(client)
+                  if 'logger' in params: args.append(logger)
+                  if 'nocache' in params: args.append(bool(force))
+                  func(*args)
+                  return True
+              except Exception as e:
+                  print(f"Helper {getattr(func,'__name__','<func>')} failed: {e}")
+                  return False
+
+          for fp in files:
+              try:
+                  data = json.load(open(fp,'r'))
+                  ts = make_test_spec(data)
+              except Exception as e:
+                  print(f"Skip {fp}: cannot create TestSpec: {e}")
+                  continue
+              ok = False
+              for name in ('ensure_env_image','build_env_image','build_environment_image','build_env'):
+                  if hasattr(db, name):
+                      print(f"Calling {name} for {fp}")
+                      if call_helper(getattr(db,name), ts, force=True):
+                          ok = True
+                          break
+              if not ok:
+                  print(f"No suitable env build helper for {fp}; proceeding")
+          PY
           python scripts/validate_changed.py
 
       - name: Upload logs
