@@ -226,7 +226,22 @@ jobs:
           
           # Install our validator in the official SWE-bench environment
           echo "📦 Installing validator in SWE-bench environment..."
-          pip install -e .
+          pip install -e . || {
+            echo "❌ Failed to install validator"
+            echo "Available files:"
+            ls -la
+            echo "Python path:"
+            python -c "import sys; print(sys.path)"
+            exit 1
+          }
+          
+          # Verify installation
+          echo "✅ Verifying validator installation..."
+          python -c "from swe_bench_validator.validator import SWEBenchValidator; print('✅ Validator module imported successfully')" || {
+            echo "❌ Validator import failed"
+            pip list | grep agent
+            exit 1
+          }
           
           # Set SWE-bench environment variables
           export SWE_BENCH_TIMEOUT=1800
