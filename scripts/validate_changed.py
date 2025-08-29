@@ -125,14 +125,39 @@ def main():
             import docker  # type: ignore
             import inspect
             from datetime import datetime
+            import logging
 
             # Create TestSpec from local datapoint (no dataset dependency)
             with open(file_path, 'r', encoding='utf-8') as f:
                 dp = json.load(f)
             test_spec = make_test_spec(dp)
 
-            # Ensure base/env images
+            # Ensure base/env images (простая и явная сборка)
             client = docker.from_env()
+            logger = logging.getLogger("swebench-prep")
+            logger.setLevel(logging.INFO)
+
+            # Пытаемся импортировать прямые функции сборки из текущей версии harness
+            build_env_fn = None
+            try:
+                from swebench.harness.docker_build import build_environment_image as _bei  # type: ignore
+                build_env_fn = _bei
+            except Exception:
+                try:
+                    from swebench.harness.docker_build import build_env_image as _bei2  # type: ignore
+                    build_env_fn = _bei2
+                except Exception:
+                    build_env_fn = None
+            build_base_fn = None
+            try:
+                from swebench.harness.docker_build import build_base_image as _bbi  # type: ignore
+                build_base_fn = _bbi
+            except Exception:
+                try:
+                    from swebench.harness.docker_build import build_base as _bb  # type: ignore
+                    build_base_fn = _bb
+                except Exception:
+                    build_base_fn = None
 
             def call_helper(func, force=False):
                 try:
@@ -164,21 +189,73 @@ def main():
                     print(f"  Helper {getattr(func,'__name__','<func>')} failed: {e}")
                     return False
 
-            # Base image
-            for name in ('ensure_base_image','build_base_image','build_base'):
-                if hasattr(db, name):
-                    print(f"  Calling {name}()")
-                    call_helper(getattr(db, name), force=True)
-                    break
-
-            # Env image
-            env_ok = False
-            for name in ('ensure_env_image','build_env_image','build_environment_image','build_env'):
-                if hasattr(db, name):
-                    print(f"  Calling {name}()")
-                    if call_helper(getattr(db, name), force=True):
-                        env_ok = True
+            # Base image (сначала пробуем прямую функцию, затем варианты)
+            if build_base_fn is not None:
+                try:
+                    print("  Building base image via direct function")
+                    sig = inspect.signature(build_base_fn)
+                    params = sig.parameters
+                    kwargs = {}
+                    if 'test_spec' in params: kwargs['test_spec'] = test_spec
+                    if 'client' in params: kwargs['client'] = client
+                    if 'logger' in params: kwargs['logger'] = logger
+                    if 'nocache' in params: kwargs['nocache'] = True
+                    build_base_fn(**kwargs)
+                except Exception as e:
+                    print(f"  Direct base build failed: {e}")
+            else:
+                for name in ('ensure_base_image','build_base_image','build_base'):
+                    if hasattr(db, name):
+                        print(f"  Calling {name}()")
+                        call_helper(getattr(db, name), force=True)
                         break
+
+            # Env image (явная сборка)
+            env_ok = False
+            if build_env_fn is not None:
+                try:
+                    print("  Building environment image via direct function")
+                    sig = inspect.signature(build_env_fn)
+                    params = sig.parameters
+                    kwargs = {}
+                    if 'test_spec' in params: kwargs['test_spec'] = test_spec
+                    if 'client' in params: kwargs['client'] = client
+                    if 'logger' in params: kwargs['logger'] = logger
+                    if 'nocache' in params: kwargs['nocache'] = True
+                    if 'force_rebuild' in params: kwargs['force_rebuild'] = True
+                    build_env_fn(**kwargs)
+                    env_ok = True
+                except Exception as e:
+                    print(f"  Direct env build failed: {e}")
+            if not env_ok:
+                for name in ('ensure_env_image','build_env_image','build_environment_image','build_env'):
+                    if hasattr(db, name):
+                        print(f"  Calling {name}()")
+                        if call_helper(getattr(db, name), force=True):
+                            env_ok = True
+                            break
+            # Fallback: предсборка через CLI по нормализованному ID
+            if not env_ok:
+                try:
+                    file_stem = Path(file_path).stem
+                    # Нормализация: убираем пробелы и хвосты типа ' copy', '-fail'
+                    canonical_id = file_stem.replace(' copy','').replace('-fail','')
+                    print(f"  Fallback prebuild via CLI for canonical id: {canonical_id}")
+                    cmd = [
+                        sys.executable, '-m', 'swebench.harness.run_evaluation',
+                        '--predictions_path', 'gold',
+                        '--max_workers', '1',
+                        '--instance_ids', canonical_id,
+                        '--run_id', 'prebuild'
+                    ]
+                    cp = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
+                    print(f"  CLI prebuild exit={cp.returncode}")
+                    if cp.stdout:
+                        print(cp.stdout.splitlines()[-1:][0] if cp.stdout.strip() else "")
+                    if cp.returncode == 0:
+                        env_ok = True
+                except Exception as e:
+                    print(f"  CLI prebuild failed: {e}")
             if not env_ok:
                 print("  ⚠️ No environment build helper found; proceeding to run_instance")
 
