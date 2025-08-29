@@ -198,6 +198,7 @@ class SWEBenchValidator:
                 data_point=data_point,
                 prediction=prediction,
                 test_spec=test_spec,
+                run_id=run_id,
             )
             
             execution_time = time.time() - start_time
@@ -237,6 +238,7 @@ class SWEBenchValidator:
         data_point: Dict[str, Any],
         prediction: Dict[str, str],
         test_spec: TestSpec,
+        run_id: Optional[str] = None,
     ) -> Tuple[bool, Dict[str, Any]]:
         """Run SWE-bench harness for a single instance with defensive signature handling."""
         import os
@@ -261,6 +263,19 @@ class SWEBenchValidator:
             call_kwargs['pred'] = prediction
         elif 'prediction' in params:
             call_kwargs['prediction'] = prediction
+        # Optional commonly required runtime args
+        if 'run_id' in params and run_id:
+            call_kwargs['run_id'] = run_id
+        # Docker client param names vary
+        if 'client' in params and hasattr(self, 'docker_client'):
+            call_kwargs['client'] = self.docker_client
+        if 'docker_client' in params and hasattr(self, 'docker_client'):
+            call_kwargs['docker_client'] = self.docker_client
+        # Image removal flags may vary
+        if 'rm_image' in params:
+            call_kwargs['rm_image'] = False
+        if 'remove_image' in params:
+            call_kwargs['remove_image'] = False
 
         if 'cache_level' in params and self.cache_level:
             call_kwargs['cache_level'] = self.cache_level
