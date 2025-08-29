@@ -206,3 +206,11 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .idea
+
+# SWE-bench generated files and logs
+logs/
+
+# macOS system files
+.DS_Store
+.DS_Store?
+._*

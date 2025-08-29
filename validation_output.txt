@@ -1,0 +1,139 @@
+🔍 Starting SWE-bench data point validation...
+==================================================
+Environment debug:
+  - Current directory: /Users/gronck/self/swe_bench
+  - Python version: 3.13.2 (main, Feb  4 2025, 14:51:09) [Clang 16.0.0 (clang-1600.0.26.6)]
+  - PATH: /Users/gronck/self/test_task/venv/bin:/Users/gronck/.local/bin:/opt/homebrew/bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/usr/local/go/bin:/Users/gronck/.local/bin:/opt/homebrew/bin:/Users/gronck/.cursor/extensions/ms-python.debugpy-2025.8.0-darwin-arm64/bundled/scripts/noConfigScripts
+  - SWE_BENCH_TIMEOUT: 600s
+  - SWE_BENCH_CACHE_LEVEL: none
+  - DOCKER_BUILDKIT: 1
+  - CHANGED_FILES env var: 'data_points/astropy__astropy-11693.json
+data_points/astropy__astropy-11693-fail copy.json'
+📄 Validating 2 changed data points:
+  1. data_points/astropy__astropy-11693.json
+  2. data_points/astropy__astropy-11693-fail copy.json
+==================================================
+
+🔄 [1/2] Processing data_points/astropy__astropy-11693.json...
+✅ JSON structure is valid
+  - Instance ID: astropy__astropy-11693
+  - Repository: astropy/astropy
+  - Has patch: ✅
+  - Has test_patch: ✅
+🚀 Running SWE-bench validation...
+  Instance ID: astropy__astropy-11693
+  Command: python -m swe_bench_validator --instance astropy__astropy-11693 --timeout 600 --cache-level none --verbose
+  Timeout: 660s
+  Return code: 0
+  Stdout: ✅ Docker client initialized successfully
+Validator initialized with:
+  • Data points directory: data_points
+  • Timeout: 600s
+  • Max workers: 1
+  • Cache level: none
+  • Force rebuild: False
+Validating single instance: astropy__astropy-11693
+Running validation for astropy__astropy-11693...
+Running SWE-bench harness for astropy__astropy-11693
+Evaluation result: ('astropy__astropy-11693', {'astropy__astropy-11693': {'patch_is_None': False, 'patch_exists': True, 
+'patch_successfully_applied': True...
+✅ astropy__astropy-11693: PASSED
+
+🔄 [2/2] Processing data_points/astropy__astropy-11693-fail copy.json...
+✅ JSON structure is valid
+  - Instance ID: astropy__astropy-11693-fail
+  - Repository: astropy/astropy
+  - Has patch: ✅
+  - Has test_patch: ✅
+🚀 Running SWE-bench validation...
+  Instance ID: astropy__astropy-11693-fail copy
+  Command: python -m swe_bench_validator --instance astropy__astropy-11693-fail copy --timeout 600 --cache-level none --verbose
+  Timeout: 660s
+  Return code: 1
+  Stdout: ✅ Docker client initialized successfully
+Validator initialized with:
+  • Data points directory: data_points
+  • Timeout: 600s
+  • Max workers: 1
+  • Cache level: none
+  • Force rebuild: False
+Validating single instance: astropy__astropy-11693-fail copy
+Running validation for astropy__astropy-11693-fail copy...
+Running SWE-bench harness for astropy__astropy-11693-fail
+Evaluation result: ('astropy__astropy-11693-fail', {'astropy__astropy-11693-fail': {'patch_is_None': False, 'patch_exists': True, ...
+❌ astropy__astropy-11693-fail copy: FAILED
+Full error output:
+
+Standard output:
+✅ Docker client initialized successfully
+Validator initialized with:
+  • Data points directory: data_points
+  • Timeout: 600s
+  • Max workers: 1
+  • Cache level: none
+  • Force rebuild: False
+Validating single instance: astropy__astropy-11693-fail copy
+Running validation for astropy__astropy-11693-fail copy...
+Running SWE-bench harness for astropy__astropy-11693-fail
+Evaluation result: ('astropy__astropy-11693-fail', {'astropy__astropy-11693-fail': {'patch_is_None': False, 'patch_exists': True, 
+'patch_successfully_applied': True, 'resolved': False, 'tests_status': {'FAIL_TO_PASS': {'success': [], 'failure': 
+['astropy/wcs/wcsapi/tests/test_fitswcs.py::test_non_convergence_warning']}, 'PASS_TO_PASS': {'success': 
+['astropy/wcs/wcsapi/tests/test_fitswcs.py::test_empty', 'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_simple_celestial', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values_gps', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values_deprecated', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_values_time', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_high_precision', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_location_geodetic', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_location_geocentric', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_location_geocenter', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_location_missing', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_location_incomplete', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_location_unsupported', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_time_1d_unsupported_ctype', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_unrecognized_unit', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_distortion_correlations', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_custom_ctype_to_ucd_mappings', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_caching_components_and_classes', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_sub_wcsapi_attributes', 
+'astropy/wcs/wcsapi/tests/test_fitswcs.py::test_phys_type_polarization'], 'failure': []}, 'FAIL_TO_FAIL': {'success': [], 'failure': 
+[]}, 'PASS_TO_FAIL': {'success': [], 'failure': []}}}})
+SWE-bench evaluation completed:
+  • Patch applied: ✅
+  • Issue resolved: ❌
+  • FAIL_TO_PASS: 0 passed, 1 failed
+  • PASS_TO_PASS: 27 passed, 0 failed
+❌ Validation FAILED for astropy__astropy-11693-fail copy
+  • Error: Tests failed - issue not resolved
+  • Execution time: 202.03s
+
+
+==================================================
+📊 VALIDATION SUMMARY
+==================================================
+📈 Overall Results:
+  • Total files processed: 2
+  • ✅ Passed: 1
+  • ❌ Failed: 1
+  • Success rate: 50.0%
+
+📋 Breakdown by status:
+  • ✅ PASSED: 1
+  • ❌ FAILED: 1
+
+🔍 Error Categories:
+  • VALIDATION_ERROR: 1
+    └─ SWE-bench validation failed. Check data point format and patch.
+
+🔍 FAILED VALIDATIONS DETAILS:
+------------------------------
+❌ data_points/astropy__astropy-11693-fail copy.json
+   Status: FAILED
+
+==================================================
+❌ VALIDATION FAILED!
+💡 Check the detailed error messages above and fix the issues.
+   Some failures may require data point format corrections.

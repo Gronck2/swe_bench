@@ -4,13 +4,13 @@ Command-line interface for the SWE-bench data point validator.
 
 import click
 from pathlib import Path
-from rich.console import Console
+from .utils import console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 import sys
 
 from .validator import SWEBenchValidator
 
-console = Console()
+
 
 
 @click.command()
@@ -52,6 +52,7 @@ console = Console()
     is_flag=True,
     help="Enable verbose output",
 )
+
 @click.option(
     "--output-report",
     help="Save validation report to file",
@@ -67,26 +68,23 @@ def main(
     output_report,
 ):
     """
-    Validate SWE-bench data points using the official evaluation harness.
+    Validate SWE-bench data points using official evaluation harness.
     
     This tool validates that data points:
     1. Have correct structure and required fields
-    2. Can be applied to their target repositories
-    3. Pass all FAIL_TO_PASS and PASS_TO_PASS tests
+    2. Can be applied to their target repositories  
+    3. Pass all FAIL_TO_PASS and PASS_TO_PASS tests using official swebench.harness.run_evaluation
     
     Examples:
     
-    # Validate all data points in data_points/ directory
+    # Validate all data points
     python -m swe_bench_validator
     
     # Validate specific instance
     python -m swe_bench_validator --instance astropy__astropy-11693
     
-    # Validate with custom timeout and cache settings
-    python -m swe_bench_validator --timeout 600 --cache-level env
-    
-    # Save report to file
-    python -m swe_bench_validator --output-report validation_report.md
+    # Custom timeout and settings
+    python -m swe_bench_validator --timeout 1800 --cache-level none
     """
     try:
         # Validate data points directory

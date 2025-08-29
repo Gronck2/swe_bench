@@ -2,17 +2,17 @@
 Core validator functionality for SWE-bench data points.
 """
 
-import json
-import logging
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
-from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
+
+# Local imports
+from .utils import console, setup_logging, load_json_safely, validate_data_point_structure, format_execution_time
 
 # SWE-bench library imports
 from swebench.harness.run_evaluation import run_instance
@@ -25,8 +25,7 @@ from swebench.harness.constants import (
     PASS_TO_PASS,
 )
 
-console = Console()
-logger = logging.getLogger(__name__)
+logger = setup_logging()
 
 
 @dataclass
@@ -80,44 +79,27 @@ class SWEBenchValidator:
         self.force_rebuild = force_rebuild
         
         # Setup logging
-        if verbose:
-            logging.basicConfig(level=logging.INFO)
+        global logger
+        logger = setup_logging(verbose)
         
         # Validate data points directory
         if not self.data_points_dir.exists():
             raise ValueError(f"Data points directory does not exist: {self.data_points_dir}")
         
-        # Initialize Docker client
-        try:
-            import docker
-            self.docker_client = docker.from_env()
-        except ImportError:
-            raise ImportError("Docker library not installed. Install with: pip install docker")
-        except Exception as e:
-            raise RuntimeError(f"Failed to initialize Docker client: {str(e)}")
+        # Use shared Docker client for better performance
+        from .docker_manager import docker_manager
+        self.docker_client = docker_manager.client
     
     def _load_data_point(self, file_path: Path) -> Dict[str, Any]:
         """Load a single data point from JSON file."""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            # Validate required fields
-            required_fields = [
-                'instance_id', 'repo', 'base_commit', 'patch',
-                'FAIL_TO_PASS', 'PASS_TO_PASS'
-            ]
-            
-            missing_fields = [field for field in required_fields if field not in data]
-            if missing_fields:
-                raise ValueError(f"Missing required fields: {missing_fields}")
-            
-            return data
-            
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in {file_path}: {str(e)}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to load {file_path}: {str(e)}")
+        data = load_json_safely(file_path)
+        
+        # Validate structure using common utility
+        error = validate_data_point_structure(data)
+        if error:
+            raise ValueError(f"Invalid data point in {file_path}: {error}")
+        
+        return data
     
     def _convert_to_prediction(self, data_point: Dict[str, Any]) -> Dict[str, str]:
         """Convert data point to SWE-bench prediction format."""
@@ -195,7 +177,7 @@ class SWEBenchValidator:
             if self.verbose:
                 console.print(f"Running validation for {instance_id}...")
             
-            # Run the actual SWE-bench evaluation harness
+            # Run official SWE-bench evaluation harness
             validation_success, test_results = self._run_evaluation_harness(data_point, prediction, test_spec)
             
             execution_time = time.time() - start_time
@@ -215,7 +197,7 @@ class SWEBenchValidator:
                     success=False,
                     patch_applied=test_results.get('patch_applied', False),
                     tests_passed=test_results.get('tests_passed', False),
-                    error_message=test_results.get('error_message', 'Validation failed'),
+                    error_message=test_results.get('error', test_results.get('error_message', 'Validation failed')),
                     execution_time=execution_time,
                     test_results=test_results
                 )
@@ -231,6 +213,7 @@ class SWEBenchValidator:
                 execution_time=execution_time
             )
     
+
     def _run_evaluation_harness(self, data_point: Dict[str, Any], prediction: Dict[str, str], test_spec: TestSpec) -> Tuple[bool, Dict[str, Any]]:
         """
         Run the actual SWE-bench evaluation harness to validate the data point.
@@ -270,26 +253,58 @@ class SWEBenchValidator:
             }
             
             # Check if the evaluation was successful
-            if eval_result and 'report' in eval_result:
-                report = eval_result['report']
-                
-                # Check if patch was applied successfully
-                if report.get('applied', False):
-                    test_results['patch_applied'] = True
-                
-                # Check if tests passed
-                # The evaluation is successful if all FAIL_TO_PASS tests now pass
-                # and all PASS_TO_PASS tests continue to pass
-                if report.get('resolved', False):
-                    test_results['tests_passed'] = True
-                    return True, test_results
-                else:
-                    # Get details about failed tests
-                    test_results['failed_tests'] = report.get('failed_tests', [])
-                    test_results['error_message'] = report.get('error_message', 'Tests failed')
-                    return False, test_results
+            # eval_result is a tuple: (instance_id, {instance_id: result_data})
+            if eval_result and len(eval_result) == 2:
+                instance_id, report = eval_result
+                if isinstance(report, dict) and instance_id in report:
+                    instance_data = report[instance_id]
+                    
+                    # Check if patch was applied successfully
+                    patch_applied = instance_data.get('patch_successfully_applied', False)
+                    test_results['patch_applied'] = patch_applied
+                    
+                    # Check if issue was resolved (all required tests pass)
+                    resolved = instance_data.get('resolved', False)
+                    test_results['tests_passed'] = resolved
+                    
+                    if self.verbose:
+                        console.print(f"[cyan]SWE-bench evaluation completed:[/cyan]")
+                        console.print(f"  • Patch applied: {'✅' if patch_applied else '❌'}")
+                        console.print(f"  • Issue resolved: {'✅' if resolved else '❌'}")
+                        
+                        if 'tests_status' in instance_data:
+                            tests = instance_data['tests_status']
+                            if 'FAIL_TO_PASS' in tests:
+                                fail_to_pass = tests['FAIL_TO_PASS']
+                                console.print(f"  • FAIL_TO_PASS: {len(fail_to_pass.get('success', []))} passed, {len(fail_to_pass.get('failure', []))} failed")
+                            if 'PASS_TO_PASS' in tests:
+                                pass_to_pass = tests['PASS_TO_PASS']
+                                console.print(f"  • PASS_TO_PASS: {len(pass_to_pass.get('success', []))} passed, {len(pass_to_pass.get('failure', []))} failed")
+                    
+                    # Store detailed results
+                    test_results['instance_data'] = instance_data
+                    test_results['eval_result'] = eval_result
+                    
+                    if resolved and patch_applied:
+                        return True, test_results
+                    else:
+                        # Get details about failed tests if available
+                        if 'tests_status' in instance_data:
+                            failed_tests = []
+                            tests = instance_data['tests_status']
+                            for test_type in ['FAIL_TO_PASS', 'PASS_TO_PASS']:
+                                if test_type in tests:
+                                    failed_tests.extend(tests[test_type].get('failure', []))
+                            test_results['failed_tests'] = failed_tests
+                        
+                        if not patch_applied:
+                            test_results['error_message'] = 'Patch failed to apply successfully'
+                        elif not resolved:
+                            test_results['error_message'] = 'Tests failed - issue not resolved'
+                        
+                        return False, test_results
             else:
-                test_results['error_message'] = 'Evaluation harness failed to run'
+                test_results['error_message'] = 'Evaluation harness failed to run or returned invalid result'
                 return False, test_results
                 
         except Exception as e:
@@ -361,7 +376,7 @@ class SWEBenchValidator:
             status = "✅ PASS" if result.success else "❌ FAIL"
             patch_status = "✅" if result.patch_applied else "❌"
             tests_status = "✅" if result.tests_passed else "❌"
-            time_str = f"{result.execution_time:.2f}s" if result.execution_time else "N/A"
+            time_str = format_execution_time(result.execution_time) if result.execution_time else "N/A"
             error_str = result.error_message or ""
             
             table.add_row(

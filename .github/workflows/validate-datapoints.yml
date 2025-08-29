@@ -12,7 +12,7 @@ on:
 
 jobs:
   validate-datapoints:
-    name: Validate Data Points
+    name: Validate Data Points with SWE-bench Docker
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -28,6 +28,28 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0  # Full history for git diff
+    
+    - name: Setup SWE-bench Environment with Docker Images
+      run: |
+        echo "🐋 Setting up official SWE-bench environment..."
+        # Install SWE-bench with official Docker support
+        pip install swebench[docker]
+        
+        # Build environment images for all data points (required for validation)
+        echo "🏗️ Building SWE-bench environment images..."
+        echo "This step creates the official Docker images that validation requires"
+        echo "Note: This may take 10-30 minutes depending on the repository complexity"
+        
+        timeout 2400 python scripts/build_swe_bench_images.py || {
+          echo "❌ Environment image building failed or timed out (40 minutes)"
+          echo "Will proceed with validation - validator will handle missing images gracefully"
+        }
+        
+        # List created images to confirm
+        echo "✅ Docker images created:"
+        docker images | grep -E "(sweb|astropy)" || echo "No SWE-bench images found yet"
+        
+        echo "✅ SWE-bench official installation and image building completed"
       
     - name: Debug - Repository info
       run: |
@@ -190,66 +212,63 @@ jobs:
           echo "changed_files=" >> $GITHUB_OUTPUT
         fi
     
-    - name: Validate changed data points
+    - name: Validate with Official SWE-bench Harness
       id: validation
       run: |
         if [ -n "${{ steps.changed-files.outputs.changed_files }}" ]; then
-          echo "🚀 Starting validation of changed data points..."
+          echo "🚀 Starting validation with OFFICIAL SWE-bench harness..."
           
           export CHANGED_FILES="${{ steps.changed-files.outputs.changed_files }}"
           echo "Files to validate:"
           echo "$CHANGED_FILES"
           
-          # Set SWE-bench specific environment variables
-          echo "🔧 Configuring SWE-bench environment..."
-          export SWE_BENCH_TIMEOUT=1800  # 30 minutes timeout per validation
-          export SWE_BENCH_CACHE_LEVEL=none  # No caching to save disk space
-          export DOCKER_BUILDKIT=1  # Enable BuildKit for better performance
+          # Install our validator in the official SWE-bench environment
+          echo "📦 Installing validator in SWE-bench environment..."
+          pip install -e .
           
+          # Set SWE-bench environment variables
+          export SWE_BENCH_TIMEOUT=1800
+          export SWE_BENCH_CACHE_LEVEL=none
+          export DOCKER_BUILDKIT=1
+          
+          echo "🐋 Using official SWE-bench Docker evaluation..."
           echo "Environment configuration:"
-          echo "- Timeout: $SWE_BENCH_TIMEOUT seconds"
+          echo "- SWE-bench timeout: $SWE_BENCH_TIMEOUT seconds"
           echo "- Cache level: $SWE_BENCH_CACHE_LEVEL"
-          echo "- BuildKit: $DOCKER_BUILDKIT"
+          echo "- Docker BuildKit: $DOCKER_BUILDKIT"
           
-          # Check if validation script exists
-          if [ ! -f "scripts/validate_changed.py" ]; then
-            echo "❌ Validation script not found: scripts/validate_changed.py"
-            echo "Available files in scripts directory:"
-            ls -la scripts/ 2>/dev/null || echo "scripts directory not found"
-            echo "Available Python files:"
-            find . -name "*.py" -type f | head -10
-            exit 1
-          fi
+          # Run validation script that uses official swebench.harness.run_evaluation
+          echo "🚀 Running validation with official SWE-bench harness (swebench.harness.run_evaluation)..."
           
-          # Set resource limits for Docker containers
-          echo "🐳 Setting Docker resource limits..."
-          export DOCKER_DEFAULT_PLATFORM=linux/amd64
-          
-          echo "Running validation script with enhanced error handling..."
-          python scripts/validate_changed.py
+          # Capture validation results for GitHub outputs and comments
+          echo "📊 Capturing validation results..."
+          python scripts/validate_changed.py > validation_output.txt 2>&1
           VALIDATION_EXIT_CODE=$?
-          echo "Validation script completed with exit code: $VALIDATION_EXIT_CODE"
           
-          if [ $VALIDATION_EXIT_CODE -ne 0 ]; then
-            echo "❌ Some validations failed (but continuing to generate report)"
-            echo "🔍 Debug information:"
-            echo "Python version: $(python --version)"
-            echo "Current directory: $(pwd)"
-            echo "Docker status:"
-            docker ps -a | head -5 2>/dev/null || echo "No Docker containers"
-            echo "Docker images:"
-            docker images | head -5 2>/dev/null || echo "No Docker images"
-            echo "Environment variables:"
-            env | grep -E "(CHANGED_FILES|SWE_BENCH|DOCKER|GITHUB_|PATH)" | sort
-            echo "📄 Log files found:"
-            find . -name "*.log" -type f 2>/dev/null | head -10 || echo "No log files found"
-            echo "🔚 Last few lines of recent log files:"
-            find . -name "*.log" -type f -mtime -1 -exec echo "=== {} ===" \; -exec tail -20 {} \; 2>/dev/null || echo "No recent log files"
-            
-            # Clean up Docker resources to prevent disk space issues
-            echo "🧹 Cleaning up Docker resources..."
-            docker system prune -f --volumes 2>/dev/null || echo "Docker cleanup failed"
-          fi
+          echo "Official SWE-bench validation completed with exit code: $VALIDATION_EXIT_CODE"
+          
+          # Always show validation output
+          echo "📋 Validation Output:"
+          cat validation_output.txt
+          
+          # Extract results from validation output for GitHub outputs
+          echo "📤 Setting GitHub outputs..."
+          
+          # Parse results from validation output
+          PASSED_COUNT=$(grep -o "✅ Passed: [0-9]*" validation_output.txt | grep -o "[0-9]*" || echo "0")
+          FAILED_COUNT=$(grep -o "❌ Failed: [0-9]*" validation_output.txt | grep -o "[0-9]*" || echo "0")
+          TOTAL_COUNT=$(grep -o "Total files processed: [0-9]*" validation_output.txt | grep -o "[0-9]*" || echo "0")
+          
+          echo "passed=$PASSED_COUNT" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED_COUNT" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL_COUNT" >> $GITHUB_OUTPUT
+          
+          # Save full validation output for PR comment
+          echo "validation_output<<EOF" >> $GITHUB_OUTPUT
+          cat validation_output.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "📈 Results captured: $PASSED_COUNT passed, $FAILED_COUNT failed, $TOTAL_COUNT total"
           
         else
           echo "📭 No data points to validate"
@@ -307,17 +326,38 @@ jobs:
           For local testing with full Docker support, see README.md Docker Setup section.`;
           }
           
-          const comment = `## 🔍 SWE-bench Validation Results
+          // Get full validation output
+          const validationOutput = `${{ steps.validation.outputs.validation_output }}`;
           
+          // Extract detailed error information
+          let detailsSection = '';
+          if (failed > 0) {
+            detailsSection = `
+          
+          ### 📋 Validation Details
+          
+          <details>
+          <summary>Click to see full validation output</summary>
+          
+          \`\`\`
+          ${validationOutput}
+          \`\`\`
+          
+          </details>`;
+          }
+          
+          const comment = `## 🔍 Official SWE-bench Validation Results
+          
+          **Validation Method**: Official \`swebench.harness.run_evaluation\`
           **Status**: ${status}
           **Changed Data Points**: ${total}
           **Passed**: ${passed} ✅
           **Failed**: ${failed} ❌
           
-          ${failed > 0 ? '**Action Required**: Please fix the failed validations before merging.' : '**All validations passed successfully!**'}${dockerNote}
+          ${failed > 0 ? '**Action Required**: Please fix the failed validations before merging.' : '**All validations passed successfully!**'}${dockerNote}${detailsSection}
           
           ---
-          *This comment was automatically generated by the SWE-bench validation workflow.*`;
+          *Validated using official SWE-bench evaluation harness with Docker containers.*`;
           
           if (botComment) {
             await github.rest.issues.updateComment({
@@ -339,30 +379,45 @@ jobs:
             console.log('This is expected for fork PRs or repositories with restricted permissions.');
           }
     
-    - name: Fail if validation failed
-      if: steps.validation.outputs.failed != '0'
+    - name: Validation Summary
+      if: steps.changed-files.outputs.changed_files != ''
       run: |
-        echo "❌ Data point validation failed!"
-        echo "==================================="
-        echo "FAILED VALIDATIONS: ${{ steps.validation.outputs.failed }}"
-        echo "TOTAL VALIDATIONS: ${{ steps.validation.outputs.total }}"
-        echo "PASSED VALIDATIONS: ${{ steps.validation.outputs.passed }}"
-        echo "==================================="
+        echo "📊 VALIDATION SUMMARY"
+        echo "===================="
+        echo "Total files: ${{ steps.validation.outputs.total }}"
+        echo "Passed: ${{ steps.validation.outputs.passed }}"
+        echo "Failed: ${{ steps.validation.outputs.failed }}"
         echo ""
-        echo "🔍 Debugging Information:"
-        echo "Changed files: ${{ steps.changed-files.outputs.changed_files }}"
-        echo "Event type: ${{ github.event_name }}"
-        echo "Python version: $(python --version)"
+        
+        if [ "${{ steps.validation.outputs.failed }}" != "0" ]; then
+          echo "⚠️  Some validations failed, but workflow continues to provide full feedback"
+          echo ""
+          echo "🔧 Next Steps:"
+          echo "  1. Review the detailed validation output above"
+          echo "  2. Check PR comments for specific error details"
+          echo "  3. Fix data point issues and push updates"
+          echo "  4. Re-run validation after fixes"
+          echo ""
+          echo "💡 Local Testing:"
+          echo "  python -m swe_bench_validator --instance <your-instance-id>"
+        else
+          echo "✅ All validations passed successfully!"
+        fi
+        
         echo ""
-        echo "💡 What to do next:"
-        echo "1. Check the validation output above for specific error messages"
-        echo "2. Fix the issues in your data point files"
-        echo "3. Ensure your JSON files are valid and follow SWE-bench format" 
-        echo "4. Test locally using: python -m swe_bench_validator --instance <your-instance-id>"
-        echo "5. Push your fixes and the validation will run again"
-        echo ""
-        echo "❌ Please fix the validation errors before merging."
-        exit 1
+        echo "📋 Note: This step does not fail the workflow to ensure all files are processed"
+    
+    - name: Set final job status
+      if: steps.changed-files.outputs.changed_files != ''
+      run: |
+        # Set job status based on validation results
+        if [ "${{ steps.validation.outputs.failed }}" != "0" ]; then
+          echo "❌ Final Status: FAILED (${{ steps.validation.outputs.failed }} of ${{ steps.validation.outputs.total }} files failed)"
+          echo "Please fix the validation errors before merging."
+          exit 1
+        else
+          echo "✅ Final Status: SUCCESS (All ${{ steps.validation.outputs.total }} files passed)"
+        fi
     
     - name: Success message
       if: steps.validation.outputs.failed == '0' && steps.validation.outputs.total != '0'
