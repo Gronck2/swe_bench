@@ -22,10 +22,13 @@ def main():
     print(f"  - PATH: {os.environ.get('PATH', 'not set')}")
     
     # Get changed files from environment
+    changed_files_json = os.environ.get('CHANGED_FILES_JSON', '')
     changed_files_raw = os.environ.get('CHANGED_FILES', '')
+    if changed_files_json:
+        print(f"  - CHANGED_FILES_JSON length: {len(changed_files_json)}")
     print(f"  - CHANGED_FILES env var: '{changed_files_raw}'")
     
-    if not changed_files_raw:
+    if not changed_files_json and not changed_files_raw:
         print("❌ No CHANGED_FILES environment variable found")
         print("Available environment variables:")
         for key in sorted(os.environ.keys()):
@@ -33,8 +36,19 @@ def main():
                 print(f"  - {key}: {os.environ[key]}")
         return 1
     
-    changed_files = changed_files_raw.split('\n')
-    changed_files = [f.strip() for f in changed_files if f.strip()]
+    changed_files = []
+    # Prefer JSON when available to safely handle spaces
+    if changed_files_json:
+        try:
+            parsed = json.loads(changed_files_json)
+            if isinstance(parsed, list):
+                changed_files = [str(p).strip() for p in parsed if str(p).strip()]
+            else:
+                print("⚠️ CHANGED_FILES_JSON is not a list; falling back to CHANGED_FILES")
+        except Exception as e:
+            print(f"⚠️ Failed to parse CHANGED_FILES_JSON: {e}; falling back to CHANGED_FILES")
+    if not changed_files and changed_files_raw:
+        changed_files = [f.strip() for f in changed_files_raw.split('\n') if f.strip()]
 
     if not changed_files:
         print("📭 No files to validate (empty list)")

@@ -38,11 +38,13 @@ jobs:
         with:
           files: |
             data_points/**/*.json
+          separator: "\n"
 
       - name: Validate changed data points
         if: steps.changed.outputs.any_changed == 'true'
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+          CHANGED_FILES_JSON: ${{ steps.changed.outputs.all_changed_files_json }}
           SWE_BENCH_CACHE_LEVEL: base
         run: |
           python scripts/validate_changed.py
