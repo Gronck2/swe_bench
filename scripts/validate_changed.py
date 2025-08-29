@@ -25,10 +25,12 @@ def main():
     swe_bench_timeout = os.environ.get('SWE_BENCH_TIMEOUT', '600')
     swe_bench_cache_level = os.environ.get('SWE_BENCH_CACHE_LEVEL', 'none')
     docker_buildkit = os.environ.get('DOCKER_BUILDKIT', '1')
+    allow_docker_missing = os.environ.get('ALLOW_DOCKER_IMAGE_MISSING', '').lower() in ('1', 'true', 'yes')
     
     print(f"  - SWE_BENCH_TIMEOUT: {swe_bench_timeout}s")
     print(f"  - SWE_BENCH_CACHE_LEVEL: {swe_bench_cache_level}")
     print(f"  - DOCKER_BUILDKIT: {docker_buildkit}")
+    print(f"  - ALLOW_DOCKER_IMAGE_MISSING: {allow_docker_missing}")
     
     # Get changed files from environment
     changed_files_raw = os.environ.get('CHANGED_FILES', '')
@@ -42,6 +44,7 @@ def main():
                 print(f"  - {key}: {os.environ[key]}")
         return 1
     
+    # Split by newlines (safer for file paths with spaces)
     changed_files = changed_files_raw.split('\n')
     changed_files = [f.strip() for f in changed_files if f.strip()]
 
@@ -93,7 +96,7 @@ def main():
         print(f"🚀 Running SWE-bench validation...")
         try:
             # Run validation for single instance
-            instance_id = Path(file_path).stem
+            instance_id = data.get('instance_id', Path(file_path).stem)
             print(f"  Instance ID: {instance_id}")
             
             # Build command with environment-based parameters
@@ -243,6 +246,9 @@ def main():
             print("   This is expected in CI environments without pre-built SWE-bench images.")
             print("   The validator correctly integrates with swebench.harness.run_evaluation.")
             print("   For full validation, see README.md Docker Setup section.")
+            if allow_docker_missing:
+                print("✅ ALLOW_DOCKER_IMAGE_MISSING is enabled — not failing the job due to missing images.")
+                return 0
         else:
             print("💡 Check the detailed error messages above and fix the issues.")
             print("   Some failures may require data point format corrections.")
