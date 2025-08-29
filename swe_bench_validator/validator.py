@@ -194,6 +194,12 @@ class SWEBenchValidator:
             if self.verbose:
                 console.print(f"Running validation for {instance_id} using SWE-bench harness...")
 
+            # Ensure required Docker images (base/env) exist or are built
+            try:
+                self._ensure_required_images(test_spec)
+            except Exception as e:
+                logger.warning(f"Failed to pre-build/ensure images: {e}")
+
             validation_success, test_results = self._run_with_harness(
                 data_point=data_point,
                 prediction=prediction,
@@ -350,6 +356,65 @@ class SWEBenchValidator:
             success = bool(result)
 
         return success, test_results
+
+    def _ensure_required_images(self, test_spec: TestSpec) -> None:
+        """Try to ensure base/env images are present by invoking docker_build helpers if available."""
+        try:
+            import swebench.harness.docker_build as db
+        except Exception as e:
+            logger.info(f"docker_build module not available: {e}")
+            return
+
+        def _call_helper(func) -> None:
+            import inspect
+            try:
+                sig = inspect.signature(func)
+                params = sig.parameters
+            except Exception:
+                params = {}
+            kwargs = {}
+            if 'test_spec' in params:
+                kwargs['test_spec'] = test_spec
+            if 'client' in params and hasattr(self, 'docker_client'):
+                kwargs['client'] = self.docker_client
+            if 'docker_client' in params and hasattr(self, 'docker_client'):
+                kwargs['docker_client'] = self.docker_client
+            if 'logger' in params:
+                kwargs['logger'] = logger
+            # nocache flags to force rebuild when requested
+            for k in ('nocache', 'no_cache', 'force_rebuild', 'rebuild'):
+                if k in params:
+                    kwargs[k] = bool(self.force_rebuild)
+            try:
+                func(**kwargs)
+            except TypeError:
+                # try positional fallback: (test_spec, client, logger, nocache)
+                args = []
+                if 'test_spec' in params:
+                    args.append(test_spec)
+                if 'client' in params and hasattr(self, 'docker_client'):
+                    args.append(self.docker_client)
+                if 'logger' in params:
+                    args.append(logger)
+                if 'nocache' in params:
+                    args.append(bool(self.force_rebuild))
+                func(*args)
+
+        # Try base image helpers
+        for name in (
+            'ensure_base_image', 'build_base_image', 'build_base',
+        ):
+            if hasattr(db, name):
+                _call_helper(getattr(db, name))
+                break
+
+        # Try environment image helpers
+        for name in (
+            'ensure_env_image', 'build_env_image', 'build_environment_image', 'build_env',
+        ):
+            if hasattr(db, name):
+                _call_helper(getattr(db, name))
+                break
     
     def validate_directory(self, progress_callback: Optional[callable] = None) -> List[ValidationResult]:
         """
