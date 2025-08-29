@@ -67,123 +67,24 @@ jobs:
           echo "Disk usage after cleanup:" && df -h
           echo "Docker system df after cleanup:" && (docker system df || true)
 
-      - name: Prebuild environment images
+      - name: Prebuild via SWE-bench CLI (gold predictions)
         if: steps.changed.outputs.any_changed == 'true'
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
-          CHANGED_FILES_JSON: ${{ steps.changed.outputs.all_changed_files_json }}
         run: |
-          python - <<'PY'
-          import os, json, sys
-          try:
-              from swebench.harness.test_spec.test_spec import make_test_spec
-              import swebench.harness.docker_build as db
-              import docker, inspect, logging
-              logger = logging.getLogger('prebuild')
-              logger.setLevel(logging.INFO)
-          except Exception as e:
-              print(f"Skip prebuild: harness modules not available: {e}")
-              sys.exit(0)
-
-          raw_json = os.environ.get('CHANGED_FILES_JSON','')
-          raw = os.environ.get('CHANGED_FILES','')
-          files = []
-          if raw_json:
-              try:
-                  files = [f for f in json.loads(raw_json) if f and f.endswith('.json')]
-              except Exception as e:
-                  print(f"Failed to parse CHANGED_FILES_JSON: {e}")
-          if not files and raw:
-              files = [f.strip() for f in raw.split('\n') if f.strip().endswith('.json')]
-          files = list(dict.fromkeys(files))
-          if not files:
-              sys.exit(0)
-
-          client = docker.from_env()
-
-          def call_helper(func, test_spec, force=False):
-              try:
-                  sig = inspect.signature(func)
-                  params = sig.parameters
-              except Exception:
-                  params = {}
-              kwargs = {}
-              if 'test_spec' in params:
-                  kwargs['test_spec'] = test_spec
-              if 'client' in params:
-                  kwargs['client'] = client
-              if 'docker_client' in params:
-                  kwargs['docker_client'] = client
-              if 'logger' in params:
-                  kwargs['logger'] = logger
-              for k in ('nocache','no_cache','force_rebuild','rebuild','ensure'):
-                  if k in params:
-                      kwargs[k] = bool(force)
-              try:
-                  func(**kwargs)
-                  return True
-              except TypeError:
-                  # positional fallback
-                  args=[]
-                  if 'test_spec' in params: args.append(test_spec)
-                  if 'client' in params: args.append(client)
-                  if 'logger' in params: args.append(logger)
-                  if 'nocache' in params: args.append(bool(force))
-                  func(*args)
-                  return True
-              except Exception as e:
-                  print(f"Helper {getattr(func,'__name__','<func>')} failed: {e}")
-                  return False
-
-          for fp in files:
-              try:
-                  data = json.load(open(fp,'r'))
-                  ts = make_test_spec(data)
-              except Exception as e:
-                  print(f"Skip {fp}: cannot create TestSpec: {e}")
-                  continue
-              # Try to ensure/build base image first
-              for base_name in ('ensure_base_image','build_base_image','build_base'):
-                  if hasattr(db, base_name):
-                      print(f"Calling {base_name} for base (from {fp})")
-                      try:
-                          call_helper(getattr(db, base_name), ts, force=True)
-                          break
-                      except Exception as be:
-                          print(f"Base helper {base_name} failed: {be}")
-
-              ok = False
-              for name in ('ensure_env_image','build_env_image','build_environment_image','build_env'):
-                  if hasattr(db, name):
-                      print(f"Calling {name} for {fp}")
-                      if call_helper(getattr(db,name), ts, force=True):
-                          ok = True
-                          break
-              if not ok:
-                  # If no helper worked, try to compute env image name and docker pull it
-                  pulled = False
-                  for getter in ('get_env_image_name','get_environment_image_name','env_image_name'):
-                      if hasattr(db, getter):
-                          try:
-                              env_name = getattr(db, getter)(ts)
-                              print(f"Attempt docker pull of env image: {env_name}")
-                              try:
-                                  client.images.pull(env_name)
-                                  pulled = True
-                                  break
-                              except Exception as pe:
-                                  print(f"docker pull failed: {pe}")
-                          except Exception as ge:
-                              print(f"Getter {getter} failed: {ge}")
-                  if not pulled:
-                      print(f"No suitable env build/pull method for {fp}; proceeding")
-          PY
+          set -e
+          echo "$CHANGED_FILES" | awk -F/ '/\.json$/ && $1=="data_points" {gsub(/\.json$/,"",$2); print $2}' | sort -u > ids.txt
+          echo "Instances:"; cat ids.txt || true
+          while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            echo "Prebuilding via run_evaluation for $id"
+            python -m swebench.harness.run_evaluation --predictions_path gold --max_workers 1 --instance_ids "$id" --run_id "prebuild-${GITHUB_RUN_ID}" || true
+          done < ids.txt
 
       - name: Validate changed data points
         if: steps.changed.outputs.any_changed == 'true'
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
-          CHANGED_FILES_JSON: ${{ steps.changed.outputs.all_changed_files_json }}
           SWE_BENCH_CACHE_LEVEL: base
         run: |
           python scripts/validate_changed.py
