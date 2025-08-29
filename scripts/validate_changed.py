@@ -116,39 +116,127 @@ def main():
             results.append({'file': file_path, 'status': 'READ_ERROR', 'error': f'Read error: {e}'})
             continue
             
-        print(f"🚀 Running SWE-bench validation...")
+        print(f"🚀 Building and running inside SWE-bench container...")
         try:
-            # Run validation for single instance
+            # Prepare harness components
+            from swebench.harness.test_spec.test_spec import make_test_spec
+            from swebench.harness.run_evaluation import run_instance
+            import swebench.harness.docker_build as db  # type: ignore
+            import docker  # type: ignore
+            import inspect
+
+            # Create TestSpec from local datapoint (no dataset dependency)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                dp = json.load(f)
+            test_spec = make_test_spec(dp)
+
+            # Ensure base/env images
+            client = docker.from_env()
+
+            def call_helper(func, force=False):
+                try:
+                    sig = inspect.signature(func)
+                    params = sig.parameters
+                except Exception:
+                    params = {}
+                kwargs = {}
+                if 'test_spec' in params:
+                    kwargs['test_spec'] = test_spec
+                if 'client' in params:
+                    kwargs['client'] = client
+                if 'docker_client' in params:
+                    kwargs['docker_client'] = client
+                for k in ('nocache','no_cache','force_rebuild','rebuild','ensure'):
+                    if k in params:
+                        kwargs[k] = True if force else False
+                try:
+                    func(**kwargs)
+                    return True
+                except TypeError:
+                    args = []
+                    if 'test_spec' in params: args.append(test_spec)
+                    if 'client' in params: args.append(client)
+                    if 'nocache' in params: args.append(bool(force))
+                    func(*args)
+                    return True
+                except Exception as e:
+                    print(f"  Helper {getattr(func,'__name__','<func>')} failed: {e}")
+                    return False
+
+            # Base image
+            for name in ('ensure_base_image','build_base_image','build_base'):
+                if hasattr(db, name):
+                    print(f"  Calling {name}()")
+                    call_helper(getattr(db, name), force=True)
+                    break
+
+            # Env image
+            env_ok = False
+            for name in ('ensure_env_image','build_env_image','build_environment_image','build_env'):
+                if hasattr(db, name):
+                    print(f"  Calling {name}()")
+                    if call_helper(getattr(db, name), force=True):
+                        env_ok = True
+                        break
+            if not env_ok:
+                print("  ⚠️ No environment build helper found; proceeding to run_instance")
+
+            # Run evaluation for this TestSpec using run_instance with defensive signature
+            import os as _os
+            _os.environ['SWE_BENCH_CACHE_LEVEL'] = _os.environ.get('SWE_BENCH_CACHE_LEVEL','base')
+
+            try:
+                sig = inspect.signature(run_instance)
+                params = sig.parameters
+            except Exception:
+                params = {}
+
+            pred = { 'instance_id': dp.get('instance_id','local'), 'model_name_or_path': 'gold', 'model_patch': dp.get('patch','') }
+            call_kwargs = {}
+            if 'test_spec' in params: call_kwargs['test_spec'] = test_spec
+            if 'pred' in params: call_kwargs['pred'] = pred
+            elif 'prediction' in params: call_kwargs['prediction'] = pred
+            if 'client' in params: call_kwargs['client'] = client
+            if 'docker_client' in params: call_kwargs['docker_client'] = client
+            if 'cache_level' in params: call_kwargs['cache_level'] = _os.environ['SWE_BENCH_CACHE_LEVEL']
+            if 'timeout' in params: call_kwargs['timeout'] = 600
+            if 'force_rebuild' in params: call_kwargs['force_rebuild'] = True
+            if 'num_workers' in params: call_kwargs['num_workers'] = 1
+            if 'max_workers' in params: call_kwargs['max_workers'] = 1
+            if 'rm_image' in params: call_kwargs['rm_image'] = False
+            if 'remove_image' in params: call_kwargs['remove_image'] = False
+
+            call_args = []
+            if not call_kwargs:
+                call_args = [test_spec, pred]
+
             instance_id = Path(file_path).stem
             print(f"  Instance ID: {instance_id}")
-            
-            cmd = ['python', '-m', 'swe_bench_validator', '--instance', instance_id, '--force-rebuild']
-            print(f"  Command: {' '.join(cmd)}")
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            
-            print(f"  Return code: {result.returncode}")
-            if result.stdout:
-                print(f"  Stdout: {result.stdout[:500]}...")
-            if result.stderr:
-                print(f"  Stderr: {result.stderr[:500]}...")
-            
-            if result.returncode == 0:
+            result = None
+            try:
+                result = run_instance(*call_args, **call_kwargs)
+            except Exception as e:
+                print(f"  run_instance error: {e}")
+                results.append({'file': file_path, 'status': 'FAILED', 'error': str(e)})
+                continue
+
+            # Interpret result
+            success = False
+            if isinstance(result, dict):
+                status = str(result.get('status') or result.get('eval_status') or '').upper()
+                success = bool(result.get('success')) or status == 'PASSED'
+            elif isinstance(result, bool):
+                success = result
+
+            if success:
                 print(f"✅ {instance_id}: PASSED")
                 results.append({'file': file_path, 'status': 'PASSED', 'error': None})
             else:
                 print(f"❌ {instance_id}: FAILED")
-                print(f"Full error output:")
-                print(result.stderr)
-                if result.stdout:
-                    print(f"Standard output:")
-                    print(result.stdout)
-                results.append({'file': file_path, 'status': 'FAILED', 'error': result.stderr})
-                
-        except subprocess.TimeoutExpired:
-            print(f"⏰ {instance_id}: TIMEOUT (>600s)")
-            results.append({'file': file_path, 'status': 'TIMEOUT', 'error': 'Validation timed out after 600 seconds'})
+                results.append({'file': file_path, 'status': 'FAILED', 'error': str(result)})
+
         except Exception as e:
+            instance_id = Path(file_path).stem
             print(f"💥 {instance_id}: UNEXPECTED ERROR")
             print(f"Exception: {type(e).__name__}: {str(e)}")
             import traceback
