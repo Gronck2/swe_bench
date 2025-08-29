@@ -189,15 +189,16 @@ class SWEBenchValidator:
             # Create test specification
             test_spec = make_test_spec(data_point)
             
-            # Run evaluation
+            # Run evaluation (Docker harness)
             run_id = f"validation-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            
             if self.verbose:
-                console.print(f"Running validation for {instance_id}...")
-            
-            # Note: run_instance requires additional setup that we'll implement
-            # For now, we'll simulate the validation process
-            validation_success = self._simulate_validation(data_point, prediction, test_spec)
+                console.print(f"Running validation for {instance_id} using SWE-bench harness...")
+
+            validation_success, test_results = self._run_with_harness(
+                data_point=data_point,
+                prediction=prediction,
+                test_spec=test_spec,
+            )
             
             execution_time = time.time() - start_time
             
@@ -205,18 +206,18 @@ class SWEBenchValidator:
                 return ValidationResult(
                     instance_id=instance_id,
                     success=True,
-                    patch_applied=True,
-                    tests_passed=True,
+                    patch_applied=bool(test_results.get('patch_applied', True)),
+                    tests_passed=bool(test_results.get('tests_passed', True)),
                     execution_time=execution_time,
-                    test_results={'status': 'PASSED'}
+                    test_results=test_results or {'status': 'PASSED'}
                 )
             else:
                 return ValidationResult(
                     instance_id=instance_id,
                     success=False,
-                    patch_applied=False,
-                    tests_passed=False,
-                    error_message="Validation failed",
+                    patch_applied=bool(test_results.get('patch_applied', False)),
+                    tests_passed=bool(test_results.get('tests_passed', False)),
+                    error_message=test_results.get('error') or "Validation failed",
                     execution_time=execution_time
                 )
                 
@@ -231,28 +232,101 @@ class SWEBenchValidator:
                 execution_time=execution_time
             )
     
-    def _simulate_validation(self, data_point: Dict[str, Any], prediction: Dict[str, str], test_spec: TestSpec) -> bool:
-        """
-        Simulate validation process for development/testing.
-        This will be replaced with actual harness integration.
-        """
-        # For now, we'll do basic validation without running Docker
-        # This allows us to test the validator structure
-        
-        # Check if patch looks valid (basic syntax check)
-        patch = data_point.get('patch', '')
-        if not patch.startswith('diff --git'):
-            return False
-        
-        # Check if test specifications exist
-        fail_to_pass = data_point.get('FAIL_TO_PASS', '')
-        pass_to_pass = data_point.get('PASS_TO_PASS', '')
-        
-        if not fail_to_pass and not pass_to_pass:
-            return False
-        
-        # Basic validation passed
-        return True
+    def _run_with_harness(
+        self,
+        data_point: Dict[str, Any],
+        prediction: Dict[str, str],
+        test_spec: TestSpec,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Run SWE-bench harness for a single instance with defensive signature handling."""
+        import os
+        import inspect
+
+        # Pass cache level via env for harness if supported
+        if self.cache_level:
+            os.environ['SWE_BENCH_CACHE_LEVEL'] = str(self.cache_level)
+
+        # Compose kwargs based on available parameters in run_instance
+        try:
+            sig = inspect.signature(run_instance)
+            params = sig.parameters
+        except Exception:
+            params = {}
+
+        call_kwargs = {}
+        # Commonly supported parameters across versions
+        if 'test_spec' in params:
+            call_kwargs['test_spec'] = test_spec
+        if 'pred' in params:
+            call_kwargs['pred'] = prediction
+        elif 'prediction' in params:
+            call_kwargs['prediction'] = prediction
+
+        if 'cache_level' in params and self.cache_level:
+            call_kwargs['cache_level'] = self.cache_level
+        if 'timeout' in params and self.timeout:
+            call_kwargs['timeout'] = int(self.timeout)
+        if 'force_rebuild' in params:
+            call_kwargs['force_rebuild'] = bool(self.force_rebuild)
+        if 'num_workers' in params and self.max_workers:
+            call_kwargs['num_workers'] = int(self.max_workers)
+        if 'max_workers' in params and self.max_workers:
+            call_kwargs['max_workers'] = int(self.max_workers)
+        if 'verbose' in params:
+            call_kwargs['verbose'] = bool(self.verbose)
+
+        # Fallback positional args if names not present
+        call_args = []
+        if not call_kwargs:
+            call_args = [test_spec, prediction]
+
+        try:
+            result = run_instance(*call_args, **call_kwargs)
+        except Exception as e:
+            return False, {'error': f"Harness execution error: {type(e).__name__}: {e}", 'patch_applied': False, 'tests_passed': False}
+
+        # Interpret result in a defensive way
+        test_results: Dict[str, Any] = {}
+        success = False
+
+        try:
+            if isinstance(result, dict):
+                # Common keys
+                status = str(result.get('status') or result.get('eval_status') or '').upper()
+                success = bool(result.get('success')) or status == 'PASSED'
+                # If harness provides more detailed results
+                test_results.update(result)
+            elif isinstance(result, (list, tuple)) and result:
+                # Sometimes returns (success, details)
+                if isinstance(result[0], bool):
+                    success = result[0]
+                # Try to capture text output
+                if len(result) > 1 and isinstance(result[1], str):
+                    test_results['test_output'] = result[1]
+            elif isinstance(result, bool):
+                success = result
+            elif isinstance(result, str):
+                # Parse sentinel markers from output
+                output = result
+                test_results['test_output'] = output
+                if ">>>>> All Tests Passed" in output:
+                    success = True
+                elif ">>>>> Patch Apply Failed" in output:
+                    success = False
+            
+            # Derive flags from output if available
+            output_text = str(test_results.get('test_output') or '')
+            if output_text:
+                if ">>>>> Applied Patch" in output_text:
+                    test_results['patch_applied'] = True
+                if ">>>>> All Tests Passed" in output_text:
+                    test_results['tests_passed'] = True
+
+        except Exception:
+            # If parsing fails, rely on truthiness of result
+            success = bool(result)
+
+        return success, test_results
     
     def validate_directory(self, progress_callback: Optional[callable] = None) -> List[ValidationResult]:
         """
