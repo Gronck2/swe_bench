@@ -37,18 +37,39 @@ def main():
         return 1
     
     changed_files = []
+
+    def sanitize_path(p: str) -> str:
+        # Trim whitespace and carriage returns
+        cleaned = p.strip().rstrip('\r')
+        # Strip surrounding quotes
+        if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+            cleaned = cleaned[1:-1]
+        # Remove any trailing backslashes introduced by shell wrapping
+        while cleaned.endswith('\\'):
+            cleaned = cleaned[:-1]
+        # Normalize path separators
+        return os.path.normpath(cleaned)
     # Prefer JSON when available to safely handle spaces
     if changed_files_json:
         try:
             parsed = json.loads(changed_files_json)
             if isinstance(parsed, list):
-                changed_files = [str(p).strip() for p in parsed if str(p).strip()]
+                changed_files = [sanitize_path(str(p)) for p in parsed if str(p).strip()]
             else:
                 print("⚠️ CHANGED_FILES_JSON is not a list; falling back to CHANGED_FILES")
         except Exception as e:
             print(f"⚠️ Failed to parse CHANGED_FILES_JSON: {e}; falling back to CHANGED_FILES")
     if not changed_files and changed_files_raw:
-        changed_files = [f.strip() for f in changed_files_raw.split('\n') if f.strip()]
+        changed_files = [sanitize_path(f) for f in changed_files_raw.split('\n') if f.strip()]
+
+    # Remove duplicates while preserving order
+    seen = set()
+    deduped = []
+    for f in changed_files:
+        if f not in seen:
+            seen.add(f)
+            deduped.append(f)
+    changed_files = deduped
 
     if not changed_files:
         print("📭 No files to validate (empty list)")
