@@ -1,13 +1,12 @@
 name: Validate SWE-bench Data Points
 
 on:
-  push:
-    paths:
-      - 'data_points/**'
-      - '.github/workflows/validate-datapoints.yml'
   pull_request:
     paths:
       - 'data_points/**'
+  push:
+    branches: [main, master]
+    paths:
       - '.github/workflows/validate-datapoints.yml'
 
 jobs:
@@ -64,45 +63,19 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Build SWE-bench environment images
+    - name: Prepare SWE-bench environment
       run: |
-        echo "🔨 Building SWE-bench environment images..."
-        python -c "
-        from swebench.harness.docker_build import build_env_images
-        import docker
-        import os
+        echo "🔧 Preparing SWE-bench environment..."
+        echo "📋 Using 'none' cache level - building from scratch for maximum stability"
+        echo "⏱️  This may take longer but ensures consistent results"
 
-        client = docker.from_env()
-
-        # Build environment images for common Python versions
-        env_names = ['py310', 'py311']
-
-        for env_name in env_names:
-            try:
-                print(f'🔨 Building environment image: sweb.env.{env_name}.x86_64...')
-                # Use SWE-bench's build_env_images function
-                build_env_images(
-                    env_names=[env_name],
-                    client=client,
-                    nocache=False
-                )
-                print(f'✅ Environment {env_name} built successfully')
-            except Exception as e:
-                print(f'⚠️  Could not build {env_name}: {e}')
-
-        print('🎉 Environment images setup completed')
-        "
-
-    - name: Verify environment images
+    - name: Set cache level for CI/CD
       run: |
-        echo "🔍 Verifying environment images..."
-        if docker images | grep -q sweb.env; then
-          echo "✅ SWE-bench environment images found"
-          docker images | grep sweb.env
-        else
-          echo "⚠️  No SWE-bench environment images found - will use base cache level"
-          echo "SWE_BENCH_CACHE_LEVEL=base" >> $GITHUB_ENV
-        fi
+        # Use 'none' cache level for most stable CI/CD operation
+        # This avoids Docker image dependency issues in GitHub Actions
+        echo "📦 Using 'none' cache level for stable CI/CD operation"
+        echo "SWE_BENCH_CACHE_LEVEL=none" >> $GITHUB_ENV
+        echo "✅ Cache level set to: none"
 
     - name: Get changed files
       id: changed-files
