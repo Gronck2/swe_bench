@@ -14,13 +14,14 @@ from pathlib import Path
 def main():
     print("🔍 Starting SWE-bench data point validation...")
     print("=" * 50)
-    
+
     # Debug environment
     print("Environment debug:")
     print(f"  - Current directory: {os.getcwd()}")
     print(f"  - Python version: {sys.version}")
     print(f"  - PATH: {os.environ.get('PATH', 'not set')}")
-    
+    print(f"  - SWE_BENCH_CACHE_LEVEL: {os.environ.get('SWE_BENCH_CACHE_LEVEL', 'base (default)')}")
+
     # Get changed files from environment
     changed_files_raw = os.environ.get('CHANGED_FILES', '')
     print(f"  - CHANGED_FILES env var: '{changed_files_raw}'")
@@ -87,7 +88,10 @@ def main():
             instance_id = Path(file_path).stem
             print(f"  Instance ID: {instance_id}")
             
-            cmd = ['python', '-m', 'swe_bench_validator', '--instance', instance_id]
+            # Get cache level from environment variable
+            cache_level = os.environ.get('SWE_BENCH_CACHE_LEVEL', 'base')
+            print(f"  Cache level: {cache_level}")
+            cmd = ['python', '-m', 'swe_bench_validator', '--instance', instance_id, '--cache-level', cache_level]
             print(f"  Command: {' '.join(cmd)}")
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)

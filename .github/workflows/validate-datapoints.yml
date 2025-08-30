@@ -64,6 +64,46 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Build SWE-bench environment images
+      run: |
+        echo "🔨 Building SWE-bench environment images..."
+        python -c "
+        from swebench.harness.docker_build import build_env_images
+        import docker
+        import os
+
+        client = docker.from_env()
+
+        # Build environment images for common Python versions
+        env_names = ['py310', 'py311']
+
+        for env_name in env_names:
+            try:
+                print(f'🔨 Building environment image: sweb.env.{env_name}.x86_64...')
+                # Use SWE-bench's build_env_images function
+                build_env_images(
+                    env_names=[env_name],
+                    client=client,
+                    nocache=False
+                )
+                print(f'✅ Environment {env_name} built successfully')
+            except Exception as e:
+                print(f'⚠️  Could not build {env_name}: {e}')
+
+        print('🎉 Environment images setup completed')
+        "
+
+    - name: Verify environment images
+      run: |
+        echo "🔍 Verifying environment images..."
+        if docker images | grep -q sweb.env; then
+          echo "✅ SWE-bench environment images found"
+          docker images | grep sweb.env
+        else
+          echo "⚠️  No SWE-bench environment images found - will use base cache level"
+          echo "SWE_BENCH_CACHE_LEVEL=base" >> $GITHUB_ENV
+        fi
+
     - name: Get changed files
       id: changed-files
       uses: tj-actions/changed-files@v40
@@ -81,7 +121,7 @@ jobs:
         echo "$CHANGED_FILES"
         echo ""
 
-        # Run validation script
+        # Run validation script with appropriate cache level
         python scripts/validate_changed.py
 
     - name: Validation results
