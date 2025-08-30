@@ -29,6 +29,26 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
+class SWEBenchValidatorError(Exception):
+    """Base exception for SWE-bench validator errors."""
+    pass
+
+
+class DockerError(SWEBenchValidatorError):
+    """Docker-related errors."""
+    pass
+
+
+class ValidationError(SWEBenchValidatorError):
+    """Validation-specific errors."""
+    pass
+
+
+class TimeoutError(SWEBenchValidatorError):
+    """Timeout-related errors."""
+    pass
+
+
 @dataclass
 class ValidationResult:
     """Result of validating a single data point."""
@@ -63,7 +83,7 @@ class SWEBenchValidator:
     ):
         """
         Initialize the SWE-bench validator.
-        
+
         Args:
             data_points_dir: Directory containing JSON data point files
             timeout: Timeout for test execution in seconds
@@ -78,24 +98,24 @@ class SWEBenchValidator:
         self.cache_level = cache_level
         self.verbose = verbose
         self.force_rebuild = force_rebuild
-        
+
         # Setup logging
         if verbose:
             logging.basicConfig(level=logging.INFO)
-        
+
         # Validate data points directory
         if not self.data_points_dir.exists():
             raise ValueError(f"Data points directory does not exist: {self.data_points_dir}")
-        
+
         # Initialize Docker client
         try:
             import docker
             self.docker_client = docker.from_env()
         except ImportError:
-            raise ImportError("Docker library not installed. Install with: pip install docker")
+            raise DockerError("Docker library not installed. Install with: pip install docker")
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize Docker client: {str(e)}")
-    
+            raise DockerError(f"Failed to initialize Docker client: {str(e)}")
+
     def _load_data_point(self, file_path: Path) -> Dict[str, Any]:
         """Load a single data point from JSON file."""
         try:
@@ -115,9 +135,9 @@ class SWEBenchValidator:
             return data
             
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in {file_path}: {str(e)}")
+            raise ValidationError(f"Invalid JSON in {file_path}: {str(e)}")
         except Exception as e:
-            raise RuntimeError(f"Failed to load {file_path}: {str(e)}")
+            raise ValidationError(f"Failed to load {file_path}: {str(e)}")
     
     def _convert_to_prediction(self, data_point: Dict[str, Any]) -> Dict[str, str]:
         """Convert data point to SWE-bench prediction format."""
@@ -190,34 +210,38 @@ class SWEBenchValidator:
             test_spec = make_test_spec(data_point)
             
             # Run evaluation
-            run_id = f"validation-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            
             if self.verbose:
                 console.print(f"Running validation for {instance_id}...")
-            
-            # Note: run_instance requires additional setup that we'll implement
-            # For now, we'll simulate the validation process
-            validation_success = self._simulate_validation(data_point, prediction, test_spec)
-            
+
+            # Run actual validation using SWE-bench harness
+            validation_success, test_results = self._run_validation(data_point, prediction, test_spec)
+
             execution_time = time.time() - start_time
-            
+
             if validation_success:
                 return ValidationResult(
                     instance_id=instance_id,
                     success=True,
-                    patch_applied=True,
-                    tests_passed=True,
+                    patch_applied=test_results.get('patch_applied', False),
+                    tests_passed=test_results.get('fail_to_pass_passed', False) and test_results.get('pass_to_pass_passed', False),
                     execution_time=execution_time,
-                    test_results={'status': 'PASSED'}
+                    test_results=test_results
                 )
             else:
+                error_msg = test_results.get('error', 'Validation failed')
+                if 'timeout' in test_results:
+                    error_msg = f"Validation timed out after {self.timeout} seconds"
+                elif 'error' in test_results:
+                    error_msg = "Validation encountered an error during execution"
+
                 return ValidationResult(
                     instance_id=instance_id,
                     success=False,
-                    patch_applied=False,
+                    patch_applied=test_results.get('patch_applied', False),
                     tests_passed=False,
-                    error_message="Validation failed",
-                    execution_time=execution_time
+                    error_message=error_msg,
+                    execution_time=execution_time,
+                    test_results=test_results
                 )
                 
         except Exception as e:
@@ -231,28 +255,129 @@ class SWEBenchValidator:
                 execution_time=execution_time
             )
     
-    def _simulate_validation(self, data_point: Dict[str, Any], prediction: Dict[str, str], test_spec: TestSpec) -> bool:
+    def _run_validation(self, data_point: Dict[str, Any], prediction: Dict[str, str], test_spec: TestSpec) -> Tuple[bool, Dict[str, Any]]:
         """
-        Simulate validation process for development/testing.
-        This will be replaced with actual harness integration.
+        Run actual validation using SWE-bench harness.
+
+        Returns:
+            (success, test_results)
         """
-        # For now, we'll do basic validation without running Docker
-        # This allows us to test the validator structure
-        
-        # Check if patch looks valid (basic syntax check)
-        patch = data_point.get('patch', '')
-        if not patch.startswith('diff --git'):
-            return False
-        
-        # Check if test specifications exist
-        fail_to_pass = data_point.get('FAIL_TO_PASS', '')
-        pass_to_pass = data_point.get('PASS_TO_PASS', '')
-        
-        if not fail_to_pass and not pass_to_pass:
-            return False
-        
-        # Basic validation passed
-        return True
+        import tempfile
+        import os
+        from pathlib import Path
+
+        test_results = {
+            'patch_applied': False,
+            'fail_to_pass_passed': False,
+            'pass_to_pass_passed': False,
+            'test_output': '',
+            'error': None
+        }
+
+        try:
+            # Create temporary directory for logs
+            with tempfile.TemporaryDirectory() as temp_dir:
+                log_dir = Path(temp_dir) / "validation_logs"
+                log_dir.mkdir(exist_ok=True)
+
+                # Calculate timeout with multiplier based on instance type
+                instance_id = data_point.get('instance_id', '')
+                repo = data_point.get('repo', '')
+                multiplier = 1.0
+
+                # Apply timeout multiplier based on repo
+                timeout_multipliers = {
+                    'django': 1.5,
+                    'astropy': 1.0,
+                    'matplotlib': 1.2,
+                    'scikit_learn': 1.0
+                }
+
+                for repo_key, mult in timeout_multipliers.items():
+                    if repo_key in repo:
+                        multiplier = mult
+                        break
+
+                adjusted_timeout = int(self.timeout * multiplier)
+
+                if self.verbose:
+                    console.print(f"Running evaluation with timeout: {adjusted_timeout}s (multiplier: {multiplier})")
+
+                # Run the evaluation
+                result = run_instance(
+                    test_spec=test_spec,
+                    pred=prediction,
+                    rm_image=False,  # Keep images for debugging
+                    timeout=adjusted_timeout,
+                    force_rebuild=self.force_rebuild,
+                    client=self.docker_client,  # Pass Docker client
+                    run_id=f"validation-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                )
+
+                # Parse results
+                if result:
+                    # SWE-bench harness returns a dict with instance_id as key
+                    instance_id = data_point.get('instance_id', '')
+                    if instance_id in result:
+                        instance_result = result[instance_id]
+                        test_results['instance_result'] = instance_result
+
+                        # Check if patch was applied
+                        test_results['patch_applied'] = instance_result.get('patch_successfully_applied', False)
+
+                        # Check if resolved (all tests passed)
+                        resolved = instance_result.get('resolved', False)
+                        test_results['resolved'] = resolved
+
+                        # Get test status details
+                        tests_status = instance_result.get('tests_status', {})
+
+                        # Check FAIL_TO_PASS tests
+                        fail_to_pass = tests_status.get('FAIL_TO_PASS', {})
+                        fail_to_pass_success = len(fail_to_pass.get('failure', [])) == 0 and len(fail_to_pass.get('success', [])) > 0
+                        test_results['fail_to_pass_passed'] = fail_to_pass_success
+
+                        # Check PASS_TO_PASS tests
+                        pass_to_pass = tests_status.get('PASS_TO_PASS', {})
+                        pass_to_pass_success = len(pass_to_pass.get('failure', [])) == 0
+                        test_results['pass_to_pass_passed'] = pass_to_pass_success
+
+                        # Overall success
+                        if resolved and fail_to_pass_success and pass_to_pass_success:
+                            return True, test_results
+                        else:
+                            return False, test_results
+                    else:
+                        test_results['error'] = f"No result found for instance {instance_id}"
+                        return False, test_results
+                else:
+                    test_results['error'] = "No result returned from evaluation"
+                    return False, test_results
+
+        except TimeoutError as e:
+            test_results['error'] = f"Validation timed out: {str(e)}"
+            test_results['timeout'] = True
+            if self.verbose:
+                logger.warning(f"Timeout during validation: {e}")
+            return False, test_results
+        except DockerError as e:
+            test_results['error'] = f"Docker error: {str(e)}"
+            test_results['docker_error'] = True
+            if self.verbose:
+                logger.error(f"Docker error during validation: {e}")
+            return False, test_results
+        except ValidationError as e:
+            test_results['error'] = f"Validation error: {str(e)}"
+            test_results['validation_error'] = True
+            if self.verbose:
+                logger.error(f"Validation error: {e}")
+            return False, test_results
+        except Exception as e:
+            test_results['error'] = f"Unexpected error: {str(e)}"
+            test_results['unexpected_error'] = True
+            if self.verbose:
+                logger.exception(f"Unexpected error during validation: {e}")
+            return False, test_results
     
     def validate_directory(self, progress_callback: Optional[callable] = None) -> List[ValidationResult]:
         """

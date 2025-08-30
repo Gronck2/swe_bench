@@ -2,338 +2,114 @@ name: Validate SWE-bench Data Points
 
 on:
   push:
-    branches: [ main, master ]
     paths:
       - 'data_points/**'
+      - '.github/workflows/validate-datapoints.yml'
   pull_request:
-    branches: [ main, master ]
     paths:
       - 'data_points/**'
+      - '.github/workflows/validate-datapoints.yml'
 
 jobs:
-  validate-datapoints:
-    name: Validate Data Points
+  validate:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-    
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Full history for git diff
-      
-    - name: Debug - Repository info
-      run: |
-        echo "🔍 Repository Debug Information:"
-        echo "Repository: ${{ github.repository }}"
-        echo "Event: ${{ github.event_name }}"
-        echo "Branch: ${{ github.ref }}"
-        echo "Commit SHA: ${{ github.sha }}"
-        echo "Working directory: $(pwd)"
-        echo "Repository contents:"
-        ls -la
-        if [ -d "data_points" ]; then
-          echo "Data points directory contents:"
-          ls -la data_points/ || echo "Failed to list data_points directory"
-        else
-          echo "⚠️ data_points directory not found!"
-        fi
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
-        cache: 'pip'
-    
-    - name: Set up Docker
+        python-version: '3.10'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install system dependencies
       run: |
-        echo "🐳 Setting up Docker..."
-        # Docker is pre-installed in GitHub Actions runners
-        # Just ensure it's running and accessible
-        echo "Starting Docker service..."
-        sudo systemctl start docker || {
-          echo "❌ Failed to start Docker service"
-          sudo systemctl status docker
-          exit 1
-        }
-        
-        echo "Adding user to docker group..."
-        sudo usermod -aG docker $USER || {
-          echo "❌ Failed to add user to docker group"
-          exit 1
-        }
-        
-        echo "Verifying Docker installation..."
-        docker --version || {
-          echo "❌ Docker not available"
-          exit 1
-        }
-        
-        echo "Testing Docker access..."
-        docker info || {
-          echo "❌ Docker daemon not accessible"
-          echo "Docker service status:"
-          sudo systemctl status docker
-          exit 1
-        }
-        echo "✅ Docker setup completed successfully"
-    
+        sudo apt-get update
+        sudo apt-get install -y docker.io
+
+    - name: Start Docker service
+      run: |
+        sudo systemctl start docker
+        sudo systemctl enable docker
+
     - name: Install Python dependencies
       run: |
-        echo "📦 Installing Python dependencies..."
-        
-        echo "Upgrading pip..."
-        python -m pip install --upgrade pip || {
-          echo "❌ Failed to upgrade pip"
-          exit 1
-        }
-        
-        echo "Python version: $(python --version)"
-        echo "Pip version: $(pip --version)"
-        
-        if [ -f requirements.txt ]; then
-          echo "Installing from requirements.txt..."
-          echo "Requirements file contents:"
-          cat requirements.txt
-          pip install -r requirements.txt || {
-            echo "❌ Failed to install from requirements.txt"
-            echo "Available packages:"
-            pip list
-            exit 1
-          }
-        else
-          echo "No requirements.txt found, installing default packages..."
-          pip install rich click swebench docker || {
-            echo "❌ Failed to install default packages"
-            echo "Trying to install packages individually..."
-            pip install rich || echo "Failed to install rich"
-            pip install click || echo "Failed to install click" 
-            pip install swebench || echo "Failed to install swebench"
-            pip install docker || echo "Failed to install docker"
-            exit 1
-          }
-        fi
-        
-        echo "✅ Installed packages:"
-        pip list | grep -E "(rich|click|swebench|docker)" || echo "Some expected packages not found"
-    
-    - name: Get changed data point files
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Get changed files
       id: changed-files
-      run: |
-        echo "🔍 Detecting changed data point files..."
-        
-        if [ "${{ github.event_name }}" = "pull_request" ]; then
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          echo "PR mode: comparing $BASE_SHA to $HEAD_SHA"
-        else
-          BASE_SHA="${{ github.event.before }}"
-          HEAD_SHA="${{ github.event.after }}"
-          echo "Push mode: comparing $BASE_SHA to $HEAD_SHA"
-        fi
-        
-        echo "Checking if SHAs are valid..."
-        git show --format="" --name-only $BASE_SHA >/dev/null 2>&1 || {
-          echo "❌ Base SHA $BASE_SHA is not valid"
-          echo "Available commits:"
-          git log --oneline -10
-          exit 1
-        }
-        
-        git show --format="" --name-only $HEAD_SHA >/dev/null 2>&1 || {
-          echo "❌ Head SHA $HEAD_SHA is not valid" 
-          echo "Available commits:"
-          git log --oneline -10
-          exit 1
-        }
-        
-        echo "Getting changed files..."
-        ALL_CHANGED=$(git diff --name-only --diff-filter=AM $BASE_SHA $HEAD_SHA 2>&1) || {
-          echo "❌ Failed to get diff between $BASE_SHA and $HEAD_SHA"
-          echo "Git status:"
-          git status
-          echo "Git log:"
-          git log --oneline -5
-          exit 1
-        }
-        
-        echo "All changed files:"
-        echo "$ALL_CHANGED"
-        
-        CHANGED_FILES=$(echo "$ALL_CHANGED" | grep '^data_points/.*\.json$' || true)
-        
-        if [ -n "$CHANGED_FILES" ]; then
-          echo "📄 Changed data point files found:"
-          echo "$CHANGED_FILES"
-          
-          # Validate each file exists and is readable
-          echo "$CHANGED_FILES" | while read -r file; do
-            if [ -f "$file" ]; then
-              echo "✅ $file exists and is readable"
-              # Check if it's valid JSON
-              python -m json.tool "$file" >/dev/null 2>&1 || {
-                echo "❌ $file is not valid JSON"
-                exit 1
-              }
-            else
-              echo "❌ $file does not exist or is not readable"
-              exit 1
-            fi
-          done
-          
-          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-        else
-          echo "📭 No data point files changed"
-          echo "changed_files=" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: Validate changed data points
-      id: validation
-      run: |
-        if [ -n "${{ steps.changed-files.outputs.changed_files }}" ]; then
-          echo "🚀 Starting validation of changed data points..."
-          
-          export CHANGED_FILES="${{ steps.changed-files.outputs.changed_files }}"
-          echo "Files to validate:"
-          echo "$CHANGED_FILES"
-          
-          # Check if validation script exists
-          if [ ! -f "scripts/validate_changed.py" ]; then
-            echo "❌ Validation script not found: scripts/validate_changed.py"
-            echo "Available files in scripts directory:"
-            ls -la scripts/ 2>/dev/null || echo "scripts directory not found"
-            echo "Available Python files:"
-            find . -name "*.py" -type f | head -10
-            exit 1
-          fi
-          
-          echo "Running validation script..."
-          python scripts/validate_changed.py
-          VALIDATION_EXIT_CODE=$?
-          echo "Validation script completed with exit code: $VALIDATION_EXIT_CODE"
-          
-          if [ $VALIDATION_EXIT_CODE -ne 0 ]; then
-            echo "❌ Some validations failed (but continuing to generate report)"
-            echo "Python version: $(python --version)"
-            echo "Current directory: $(pwd)"
-            echo "Environment variables:"
-            env | grep -E "(CHANGED_FILES|GITHUB_|PATH)" | sort
-            echo "Last few lines of any log files:"
-            find . -name "*.log" -type f -exec tail -10 {} \; 2>/dev/null || echo "No log files found"
-          fi
-          
-        else
-          echo "📭 No data points to validate"
-          echo "passed=0" >> $GITHUB_OUTPUT
-          echo "failed=0" >> $GITHUB_OUTPUT
-          echo "total=0" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: Debug Comment Conditions
-      if: github.event_name == 'pull_request'
-      run: |
-        echo "🔍 Debug Comment Conditions:"
-        echo "Event name: ${{ github.event_name }}"
-        echo "Changed files: '${{ steps.changed-files.outputs.changed_files }}'"
-        echo "Head repo: ${{ github.event.pull_request.head.repo.full_name }}"
-        echo "Base repo: ${{ github.repository }}"
-        echo "Condition check: ${{ steps.changed-files.outputs.changed_files != '' }}"
-    
-    - name: Comment on PR
-      if: github.event_name == 'pull_request' && steps.changed-files.outputs.changed_files != '' && github.event.pull_request.head.repo.full_name == github.repository
-      uses: actions/github-script@v7
-      continue-on-error: true
+      uses: tj-actions/changed-files@v40
       with:
-        script: |
-          try {
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-          
-          const botComment = comments.find(comment => 
-            comment.user.type === 'Bot' && 
-            comment.body.includes('SWE-bench Validation Results')
-          );
-          
-          const passed = ${{ steps.validation.outputs.passed || 0 }};
-          const failed = ${{ steps.validation.outputs.failed || 0 }};
-          const total = ${{ steps.validation.outputs.total || 0 }};
-          
-          let status = '✅ PASSED';
-          if (failed > 0) {
-            status = '❌ FAILED';
-          }
-          
-          const comment = `## 🔍 SWE-bench Validation Results
-          
-          **Status**: ${status}
-          **Changed Data Points**: ${total}
-          **Passed**: ${passed} ✅
-          **Failed**: ${failed} ❌
-          
-          ${failed > 0 ? '**Action Required**: Please fix the failed validations before merging.' : '**All validations passed successfully!**'}
-          
-          ---
-          *This comment was automatically generated by the SWE-bench validation workflow.*`;
-          
-          if (botComment) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: botComment.id,
-              body: comment,
-            });
-          } else {
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: comment,
-            });
-          }
-          } catch (error) {
-            console.log('Failed to comment on PR:', error.message);
-            console.log('This is expected for fork PRs or repositories with restricted permissions.');
-          }
-    
-    - name: Fail if validation failed
-      if: steps.validation.outputs.failed != '0'
+        files: data_points/**.json
+        separator: '\n'
+
+    - name: Validate data points
+      if: steps.changed-files.outputs.any_changed == 'true'
+      env:
+        CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
       run: |
-        echo "❌ Data point validation failed!"
-        echo "==================================="
-        echo "FAILED VALIDATIONS: ${{ steps.validation.outputs.failed }}"
-        echo "TOTAL VALIDATIONS: ${{ steps.validation.outputs.total }}"
-        echo "PASSED VALIDATIONS: ${{ steps.validation.outputs.passed }}"
-        echo "==================================="
+        echo "🔍 Validating changed data points..."
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
         echo ""
-        echo "🔍 Debugging Information:"
-        echo "Changed files: ${{ steps.changed-files.outputs.changed_files }}"
-        echo "Event type: ${{ github.event_name }}"
-        echo "Python version: $(python --version)"
-        echo ""
-        echo "💡 What to do next:"
-        echo "1. Check the validation output above for specific error messages"
-        echo "2. Fix the issues in your data point files"
-        echo "3. Ensure your JSON files are valid and follow SWE-bench format" 
-        echo "4. Test locally using: python -m swe_bench_validator --instance <your-instance-id>"
-        echo "5. Push your fixes and the validation will run again"
-        echo ""
-        echo "❌ Please fix the validation errors before merging."
-        exit 1
-    
-    - name: Success message
-      if: steps.validation.outputs.failed == '0' && steps.validation.outputs.total != '0'
+
+        # Run validation script
+        python scripts/validate_changed.py
+
+    - name: Validation results
+      if: steps.changed-files.outputs.any_changed == 'true'
       run: |
-        echo "✅ All data point validations passed successfully!"
-        echo "Changed files: ${{ steps.changed-files.outputs.changed_files }}"
+        if [ $? -eq 0 ]; then
+          echo "✅ All validations passed!"
+        else
+          echo "❌ Some validations failed!"
+          exit 1
+        fi
+
+    - name: Upload validation logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: validation-logs
+        path: |
+          logs/
+          *.log
+        retention-days: 7
+
+  # Optional: Test on multiple Python versions
+  test-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run basic validator tests
+      run: |
+        python -c "from swe_bench_validator import SWEBenchValidator; print('✅ Import successful')"
+        python -m swe_bench_validator --help

@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 import sys
 
-from .validator import SWEBenchValidator
+from .validator import SWEBenchValidator, SWEBenchValidatorError, DockerError, ValidationError, TimeoutError
 
 console = Console()
 
@@ -190,8 +190,31 @@ def main(
         else:
             console.print("[yellow]No data points found for validation[/yellow]")
             
+    except DockerError as e:
+        console.print(f"[bold red]🐳 Docker Error: {str(e)}[/bold red]")
+        console.print("[yellow]💡 Make sure Docker is running and you have proper permissions[/yellow]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+    except ValidationError as e:
+        console.print(f"[bold red]📋 Validation Error: {str(e)}[/bold red]")
+        console.print("[yellow]💡 Check the data point format and required fields[/yellow]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+    except TimeoutError as e:
+        console.print(f"[bold red]⏰ Timeout Error: {str(e)}[/bold red]")
+        console.print("[yellow]💡 Try increasing the timeout or check system resources[/yellow]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
+    except SWEBenchValidatorError as e:
+        console.print(f"[bold red]🔧 SWE-bench Validator Error: {str(e)}[/bold red]")
+        if verbose:
+            console.print_exception()
+        sys.exit(1)
     except Exception as e:
-        console.print(f"[bold red]✗ Error: {str(e)}[/bold red]")
+        console.print(f"[bold red]💥 Unexpected Error: {str(e)}[/bold red]")
         if verbose:
             console.print_exception()
         sys.exit(1)
