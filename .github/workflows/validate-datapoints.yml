@@ -69,13 +69,17 @@ jobs:
         echo "📋 Using 'none' cache level - building from scratch for maximum stability"
         echo "⏱️  This may take longer but ensures consistent results"
 
-    - name: Set cache level for CI/CD
+    - name: Configure SWE-bench for CI/CD
       run: |
-        # Use 'none' cache level for most stable CI/CD operation
-        # This avoids Docker image dependency issues in GitHub Actions
-        echo "📦 Using 'none' cache level for stable CI/CD operation"
+        # Disable all caching for maximum CI/CD stability
+        echo "📦 Configuring SWE-bench for CI/CD stability..."
         echo "SWE_BENCH_CACHE_LEVEL=none" >> $GITHUB_ENV
-        echo "✅ Cache level set to: none"
+        echo "DOCKER_BUILDKIT=0" >> $GITHUB_ENV
+        echo "BUILDKIT_PROGRESS=plain" >> $GITHUB_ENV
+        echo "✅ SWE-bench configured for CI/CD operation"
+        echo "   • Cache level: none"
+        echo "   • BuildKit: disabled"
+        echo "   • Progress: plain"
 
     - name: Get changed files
       id: changed-files

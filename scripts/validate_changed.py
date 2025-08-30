@@ -91,10 +91,32 @@ def main():
             # Get cache level from environment variable
             cache_level = os.environ.get('SWE_BENCH_CACHE_LEVEL', 'base')
             print(f"  Cache level: {cache_level}")
-            cmd = ['python', '-m', 'swe_bench_validator', '--instance', instance_id, '--cache-level', cache_level]
+
+            # Build command with additional parameters for stability
+            cmd = [
+                'python', '-m', 'swe_bench_validator',
+                '--instance', instance_id,
+                '--cache-level', cache_level,
+                '--force-rebuild',
+                '--verbose'
+            ]
+
+            # Add timeout based on cache level
+            if cache_level == 'none':
+                cmd.extend(['--timeout', '900'])  # 15 minutes for no-cache builds
+                print(f"  Timeout: 900s (extended for no-cache build)")
+                print(f"  Force rebuild: enabled")
+                print(f"  Verbose: enabled")
+            else:
+                cmd.extend(['--timeout', '600'])  # 10 minutes for cached builds
+                print(f"  Timeout: 600s (standard for cached build)")
+                print(f"  Force rebuild: enabled")
+                print(f"  Verbose: enabled")
             print(f"  Command: {' '.join(cmd)}")
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            # Set subprocess timeout based on cache level
+            subprocess_timeout = 900 if cache_level == 'none' else 600
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=subprocess_timeout)
             
             print(f"  Return code: {result.returncode}")
             if result.stdout:
